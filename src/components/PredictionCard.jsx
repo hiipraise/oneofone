@@ -1,0 +1,243 @@
+// src/components/PredictionCard.jsx
+import React, { useState } from 'react'
+
+// ─── Probability bar ─────────────────────────────────────────────────────────
+function ProbBar({ label, value, isWinner }) {
+  const pct = Math.round((value ?? 0) * 100)
+  const barColor = isWinner ? 'bg-brand-green' : 'bg-brand-midgray'
+  const textColor = isWinner ? 'text-brand-greenlight' : 'text-gray-400'
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="font-display text-xs text-gray-500 w-24 shrink-0 truncate">{label}</span>
+      <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className={`font-display text-xs w-10 text-right tabular-nums ${textColor}`}>
+        {pct}%
+      </span>
+    </div>
+  )
+}
+
+// ─── Confidence badge ────────────────────────────────────────────────────────
+function ConfidenceBadge({ value }) {
+  const pct = Math.round((value ?? 0) * 100)
+  const color =
+    pct >= 60 ? 'text-brand-greenlight bg-brand-greendark border-brand-green'
+    : pct >= 35 ? 'text-yellow-400 bg-yellow-900/30 border-yellow-700'
+    :             'text-brand-redlight bg-brand-reddark border-brand-red'
+  return (
+    <span className={`font-display text-xs px-2 py-0.5 rounded-sm border ${color}`}>
+      {pct}% confidence
+    </span>
+  )
+}
+
+// ─── BTTS badge ──────────────────────────────────────────────────────────────
+function BttsBadge({ btts }) {
+  if (!btts) return null
+  const isYes = btts.result === 'Yes'
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="font-display text-xs text-gray-600">GG</span>
+      <span className={`font-display text-xs px-2 py-0.5 rounded-sm border ${
+        isYes
+          ? 'text-brand-greenlight bg-brand-greendark border-brand-green'
+          : 'text-brand-redlight bg-brand-reddark border-brand-red'
+      }`}>
+        {isYes ? `Yes ${btts.yes_pct}%` : `No ${btts.no_pct}%`}
+      </span>
+    </div>
+  )
+}
+
+// ─── Main card ───────────────────────────────────────────────────────────────
+export default function PredictionCard({ prediction }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (!prediction) return null
+
+  const {
+    match_id,
+    home_team, away_team, sport, league, match_date,
+    home_win_probability, away_win_probability, draw_probability,
+    predicted_outcome, confidence_score,
+    confidence_interval_low, confidence_interval_high,
+    model_version, timestamp, data_sources,
+    extended_markets,
+    is_trained_model,
+  } = prediction
+
+  const bttsData = extended_markets?.btts ?? null
+
+  // Which bar is the predicted winner?
+  const winnerIs = predicted_outcome   // "home_win" | "away_win" | "draw"
+
+  // Outcome label (short)
+  const outcomeLabel =
+    predicted_outcome === 'home_win' ? `${home_team} to Win`
+    : predicted_outcome === 'away_win' ? `${away_team} to Win`
+    : 'Draw'
+
+  const outcomeColor =
+    predicted_outcome === 'home_win' ? 'text-brand-greenlight'
+    : predicted_outcome === 'away_win' ? 'text-brand-redlight'
+    : 'text-yellow-400'
+
+  // Only show draw bar when it's meaningful (> 5%)
+  const showDraw = (draw_probability ?? 0) > 0.05
+
+  const ciLow  = Math.round((confidence_interval_low  ?? 0) * 100)
+  const ciHigh = Math.round((confidence_interval_high ?? 0) * 100)
+
+  const dateLabel =
+    match_date
+    || (timestamp && new Date(timestamp).toLocaleDateString())
+    || '—'
+
+  return (
+    <div className="card p-4 animate-slide-up hover:border-gray-600 transition-colors duration-200">
+
+      {/* Header */}
+      <div className="flex items-start justify-between mb-3 gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+            {sport && <span className="tag-gray">{sport.toUpperCase()}</span>}
+            {league && <span className="tag-gray truncate max-w-[120px]">{league}</span>}
+            {!is_trained_model && (
+              <span className="tag-gray text-yellow-600">PRIOR</span>
+            )}
+          </div>
+          <p className="font-display text-sm text-white leading-snug">
+            {home_team}
+            <span className="text-gray-600 mx-1.5 text-xs">vs</span>
+            {away_team}
+          </p>
+          <p className="font-display text-xs text-gray-600 mt-0.5">{dateLabel}</p>
+        </div>
+
+        <div className="text-right shrink-0">
+          <p className={`font-display text-sm font-medium ${outcomeColor}`}>{outcomeLabel}</p>
+          <ConfidenceBadge value={confidence_score} />
+        </div>
+      </div>
+
+      {/* Probability bars */}
+      <div className="flex flex-col gap-2 my-3">
+        <ProbBar
+          label={home_team}
+          value={home_win_probability}
+          isWinner={winnerIs === 'home_win'}
+        />
+        {showDraw && (
+          <ProbBar
+            label="Draw"
+            value={draw_probability}
+            isWinner={winnerIs === 'draw'}
+          />
+        )}
+        <ProbBar
+          label={away_team}
+          value={away_win_probability}
+          isWinner={winnerIs === 'away_win'}
+        />
+      </div>
+
+      {/* Footer row */}
+      <div className="flex items-center justify-between pt-2 border-t border-brand-midgray gap-2 flex-wrap">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div>
+            <span className="label">CI</span>
+            <p className="font-display text-xs text-gray-500 mt-0.5 tabular-nums">
+              {ciLow}%–{ciHigh}%
+            </p>
+          </div>
+          <div>
+            <span className="label">MODEL</span>
+            <p className="font-display text-xs text-gray-500 mt-0.5">v{model_version}</p>
+          </div>
+          <BttsBadge btts={bttsData} />
+        </div>
+        <button
+          onClick={() => setExpanded(p => !p)}
+          className="font-display text-xs text-gray-600 hover:text-white transition-colors shrink-0"
+        >
+          {expanded ? 'LESS ↑' : 'MORE ↓'}
+        </button>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-brand-midgray animate-fade-in space-y-3">
+
+          {/* Match ID */}
+          {match_id && (
+            <div>
+              <p className="label mb-1">MATCH ID</p>
+              <p className="font-display text-xs text-gray-600 break-all">{match_id}</p>
+            </div>
+          )}
+
+          {/* Goals O/U summary */}
+          {extended_markets?.goals_over_under && (
+            <div>
+              <p className="label mb-2">GOALS O/U</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {['1_5', '2_5', '3_5'].map(key => {
+                  const market = extended_markets.goals_over_under[`over_${key}`]
+                  if (!market) return null
+                  const label = key.replace('_', '.')
+                  return (
+                    <div key={key} className="bg-brand-darkgray border border-brand-midgray p-2 rounded-sm text-center">
+                      <p className="font-display text-xs text-gray-600">O{label}</p>
+                      <p className="font-display text-xs text-white mt-0.5">
+                        {Math.round(market.over * 100)}%
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="font-display text-xs text-gray-600 mt-1.5">
+                xG: {extended_markets.goals_over_under.home_xg} – {extended_markets.goals_over_under.away_xg}
+                &nbsp;(total {extended_markets.goals_over_under.expected_goals})
+              </p>
+            </div>
+          )}
+
+          {/* Correct score top 3 */}
+          {extended_markets?.correct_score?.length > 0 && (
+            <div>
+              <p className="label mb-2">TOP CORRECT SCORES</p>
+              <div className="flex flex-wrap gap-1.5">
+                {extended_markets.correct_score.slice(0, 5).map(cs => (
+                  <div key={cs.score} className="bg-brand-darkgray border border-brand-midgray px-2 py-1 rounded-sm">
+                    <span className="font-display text-xs text-white">{cs.score}</span>
+                    <span className="font-display text-xs text-gray-600 ml-1.5">
+                      {Math.round(cs.probability * 100)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Data sources */}
+          {data_sources?.length > 0 && (
+            <div>
+              <p className="label mb-1">DATA SOURCES</p>
+              <div className="flex flex-wrap gap-1">
+                {data_sources.map((src, i) => (
+                  <span key={i} className="tag-gray">{src}</span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

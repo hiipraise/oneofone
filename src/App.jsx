@@ -1,0 +1,25 @@
+// src/App.jsx
+import React from 'react'
+import { Routes, Route } from 'react-router-dom'
+import Layout from './components/Layout'
+import Dashboard from './pages/Dashboard'
+import PredictPage from './pages/PredictPage'
+import HistoryPage from './pages/HistoryPage'
+import MetricsPage from './pages/MetricsPage'
+import ChatPage from './pages/ChatPage'
+import ChatHistoryPage from './pages/ChatHistoryPage'
+
+export default function App() {
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/predict" element={<PredictPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/metrics" element={<MetricsPage />} />
+        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/chat/history" element={<ChatHistoryPage />} />
+      </Routes>
+    </Layout>
+  )
+}
