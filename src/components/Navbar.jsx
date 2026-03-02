@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { healthCheck } from "../services/api";
 
-export default function Navbar() {
+export default function Navbar({ toggleSidebar }) {
   const location = useLocation();
   const [systemOnline, setSystemOnline] = useState(null);
 
@@ -16,22 +16,35 @@ export default function Navbar() {
   return (
     <header className="border-b border-brand-midgray bg-brand-darkgray sticky top-0 z-50">
       <div className="flex items-center justify-between px-6 py-3">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-brand-red flex items-center justify-center rounded-[25%]">
-            <span className="font-display text-xs font-medium text-white">
-              1/1
-            </span>
-          </div>
-          <div>
-            <span className="font-display text-sm text-white tracking-wider">
-              ONEOFONE
-            </span>
-            <span className="font-body text-xs text-gray-500 ml-2">
-              SPORTS PREDICTION
-            </span>
-          </div>
-        </Link>
+        
+        {/* Left side: Hamburger (mobile only) + Logo */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleSidebar}
+            className="md:hidden text-3xl leading-none text-gray-400 hover:text-white transition-colors pt-1"
+            aria-label="Open menu"
+          >
+            ☰
+          </button>
 
+          <Link to="/" className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-brand-red flex items-center justify-center rounded-[25%]">
+              <span className="font-display text-xs font-medium text-white">
+                1/1
+              </span>
+            </div>
+            <div>
+              <span className="font-display text-sm text-white tracking-wider">
+                ONEOFONE
+              </span>
+              <span className="font-body text-xs text-gray-500 ml-2">
+                SPORTS PREDICTION
+              </span>
+            </div>
+          </Link>
+        </div>
+
+        {/* Desktop top navigation (hidden on mobile) */}
         <nav className="hidden md:flex items-center gap-1">
           {[
             { path: "/", label: "DASHBOARD" },
@@ -54,6 +67,7 @@ export default function Navbar() {
           ))}
         </nav>
 
+        {/* System status (right side) */}
         <div className="flex items-center gap-2">
           <div
             className={`w-2 h-2 rounded-full ${
