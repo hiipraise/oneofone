@@ -69,6 +69,6 @@ export const restoreSession = (sessionId) =>
   api.post(`/chat/session/${sessionId}/restore`)
 
 // ── Health ────────────────────────────────────────────────────────────────────
-export const healthCheck = () => api.get('/health')
+export const healthCheck = () => axios.get(`${window.location.origin}/health`)
 
 export default api
