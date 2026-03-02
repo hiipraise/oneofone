@@ -1,4 +1,3 @@
-// src/components/Sidebar.jsx
 import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { getMetricsSummary } from '../services/api'
@@ -12,7 +11,6 @@ const NAV_ITEMS = [
   { path: '/chat/history',  label: 'Chat History', icon: '◷' },
 ]
 
-// Only the 3 supported sports
 const SPORTS = [
   { key: 'soccer',     label: 'Football / Soccer', dot: 'bg-brand-green' },
   { key: 'basketball', label: 'Basketball',         dot: 'bg-yellow-500' },
@@ -55,7 +53,7 @@ function SportLink({ sport, isActive }) {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen = false, onClose }) {
   const location = useLocation()
   const [modelSummary, setModelSummary] = useState(null)
 
@@ -67,7 +65,6 @@ export default function Sidebar() {
 
   const isActive = (path) => {
     if (path === '/') return location.pathname === '/'
-    // Don't highlight /chat when on /chat/history
     if (path === '/chat') return location.pathname === '/chat'
     return location.pathname.startsWith(path)
   }
@@ -75,7 +72,25 @@ export default function Sidebar() {
   const searchSport = new URLSearchParams(location.search).get('sport') || ''
 
   return (
-    <aside className="fixed top-[53px] left-0 w-56 h-[calc(100vh-53px)] overflow-y-auto border-r border-brand-midgray bg-brand-darkgray flex flex-col">
+    <aside className={`
+      fixed top-[53px] left-0 z-50 w-56 h-[calc(100vh-53px)] overflow-y-auto
+      border-r border-brand-midgray bg-brand-darkgray flex flex-col
+      transform transition-transform duration-300 ease-in-out
+      ${isOpen ? 'translate-x-0' : '-translate-x-full'}
+      md:translate-x-0 md:z-auto
+    `}>
+
+      {/* Mobile-only close header */}
+      <div className="md:hidden flex items-center justify-between p-3 border-b border-brand-midgray">
+        <span className="font-display font-medium text-white">Menu</span>
+        <button
+          onClick={onClose}
+          className="text-3xl leading-none text-gray-400 hover:text-white transition-colors"
+          aria-label="Close sidebar"
+        >
+          ×
+        </button>
+      </div>
 
       {/* Navigation */}
       <div className="p-3 border-b border-brand-midgray">
@@ -105,14 +120,13 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Model status block */}
+      {/* Model status block – unchanged */}
       <div className="p-3 mt-auto">
         <div className="card p-3">
           <p className="label mb-2">MODEL STATUS</p>
 
           {modelSummary ? (
             <div className="flex flex-col gap-1.5">
-              {/* Trained indicator */}
               <div className="flex items-center justify-between">
                 <span className="font-display text-xs text-gray-600">ENGINE</span>
                 <span className={`font-display text-xs ${
@@ -122,7 +136,6 @@ export default function Sidebar() {
                 </span>
               </div>
 
-              {/* Version */}
               <div className="flex items-center justify-between">
                 <span className="font-display text-xs text-gray-600">VERSION</span>
                 <span className="font-display text-xs text-gray-400">
@@ -130,7 +143,6 @@ export default function Sidebar() {
                 </span>
               </div>
 
-              {/* Accuracy */}
               {modelSummary.performance_metrics?.accuracy != null && (
                 <div className="flex items-center justify-between">
                   <span className="font-display text-xs text-gray-600">ACCURACY</span>
@@ -146,7 +158,6 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {/* Predictions count */}
               {modelSummary.total_predictions != null && (
                 <div className="flex items-center justify-between">
                   <span className="font-display text-xs text-gray-600">TOTAL PREDS</span>
@@ -156,7 +167,6 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {/* Resolved */}
               {modelSummary.total_resolved != null && (
                 <div className="flex items-center justify-between">
                   <span className="font-display text-xs text-gray-600">RESOLVED</span>
@@ -166,7 +176,6 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {/* Brier score */}
               {modelSummary.performance_metrics?.brier_score != null && (
                 <div className="pt-1 border-t border-brand-midgray mt-0.5">
                   <div className="flex items-center justify-between">
@@ -197,7 +206,6 @@ export default function Sidebar() {
             </div>
           )}
 
-          {/* Supported sports */}
           <div className="pt-2 mt-2 border-t border-brand-midgray">
             <p className="font-display text-xs text-gray-700 mb-1.5">SUPPORTED SPORTS</p>
             <div className="flex flex-wrap gap-1">
