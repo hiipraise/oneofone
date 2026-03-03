@@ -1,27 +1,29 @@
+// src/components/Sidebar.jsx
 import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { getMetricsSummary } from '../services/api'
+import { useQuota } from '../hooks/useData'
 
 const NAV_ITEMS = [
-  { path: '/',              label: 'Dashboard',    icon: '◈' },
-  { path: '/predict',       label: 'New Prediction', icon: '⊕' },
-  { path: '/history',       label: 'History',      icon: '≡' },
-  { path: '/metrics',       label: 'Model Metrics', icon: '◎' },
-  { path: '/chat',          label: 'AI Chat',      icon: '⌘' },
-  { path: '/chat/history',  label: 'Chat History', icon: '◷' },
+  { path: '/',             label: 'Dashboard',     icon: '◈' },
+  { path: '/predict',      label: 'New Prediction', icon: '⊕' },
+  { path: '/history',      label: 'History',       icon: '≡' },
+  { path: '/metrics',      label: 'Model Metrics', icon: '◎' },
+  { path: '/chat',         label: 'AI Chat',       icon: '⌘' },
+  { path: '/chat/history', label: 'Chat History',  icon: '◷' },
 ]
 
 const SPORTS = [
-  { key: 'soccer',     label: 'Football / Soccer', dot: 'bg-brand-green' },
-  { key: 'basketball', label: 'Basketball',         dot: 'bg-yellow-500' },
-  { key: 'tennis',     label: 'Tennis',             dot: 'bg-blue-500' },
+  { key: 'soccer',     label: 'Football',  dot: 'bg-brand-green' },
+  { key: 'basketball', label: 'Basketball', dot: 'bg-yellow-500' },
+  { key: 'tennis',     label: 'Tennis',    dot: 'bg-blue-500' },
 ]
 
 function NavItem({ path, label, icon, isActive }) {
   return (
     <Link
       to={path}
-      className={`flex items-center gap-3 px-3 py-2 rounded-sm transition-colors duration-150 group ${
+      className={`flex items-center gap-3 px-3 py-2 rounded-sm transition-all duration-150 group ${
         isActive
           ? 'bg-brand-midgray text-white'
           : 'text-gray-500 hover:text-white hover:bg-brand-gray'
@@ -33,29 +35,92 @@ function NavItem({ path, label, icon, isActive }) {
         {icon}
       </span>
       <span className="font-body text-sm truncate">{label}</span>
+      {isActive && (
+        <span className="ml-auto w-1 h-4 bg-brand-red rounded-full shrink-0" />
+      )}
     </Link>
   )
 }
 
-function SportLink({ sport, isActive }) {
+// ── Quota bar ──────────────────────────────────────────────────────────────────
+function QuotaBar({ quota, loading }) {
+  if (loading) {
+    return (
+      <div className="px-3 py-2">
+        <div className="h-2 bg-brand-midgray rounded-full animate-pulse" />
+      </div>
+    )
+  }
+  if (!quota) return null
+
+  const pct = Math.round((quota.used / quota.budget) * 100)
+  const remaining = quota.remaining ?? (quota.budget - quota.used)
+  const barColor =
+    pct >= 90 ? 'bg-brand-red' :
+    pct >= 70 ? 'bg-yellow-500' :
+    'bg-brand-green'
+  const textColor =
+    pct >= 90 ? 'text-brand-redlight' :
+    pct >= 70 ? 'text-yellow-400' :
+    'text-brand-greenlight'
+
   return (
-    <Link
-      to={`/history?sport=${sport.key}`}
-      className={`flex items-center justify-between px-3 py-1.5 rounded-sm transition-colors duration-150 group ${
-        isActive
-          ? 'bg-brand-gray text-white'
-          : 'text-gray-500 hover:text-white hover:bg-brand-gray'
-      }`}
-    >
-      <span className="font-body text-xs truncate">{sport.label}</span>
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sport.dot} opacity-60 group-hover:opacity-100 transition-opacity`} />
-    </Link>
+    <div className="p-3 border-b border-brand-midgray">
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="label">SEARCH QUOTA</p>
+        <span className={`font-display text-xs tabular-nums ${textColor}`}>
+          {quota.used}/{quota.budget}
+        </span>
+      </div>
+      <div className="h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+      <div className="flex items-center justify-between mt-1">
+        <span className="font-display text-xs text-gray-700">
+          {quota.month || 'this month'}
+        </span>
+        <span className={`font-display text-xs ${textColor}`}>
+          {remaining} left
+        </span>
+      </div>
+      {pct >= 90 && (
+        <div className="mt-2 bg-brand-reddark border border-brand-red rounded-sm px-2 py-1">
+          <p className="font-display text-xs text-brand-redlight">⚠ BUDGET CRITICAL</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── ML weight row ─────────────────────────────────────────────────────────────
+function MlWeightRow({ sport, weight, nSamples, dot }) {
+  const w = weight ?? 0
+  const pct = Math.round(w * 100)
+  const barColor = pct >= 60 ? 'bg-brand-green' : pct >= 30 ? 'bg-yellow-500' : 'bg-brand-midgray'
+  return (
+    <div className="flex items-center gap-2 py-1">
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+      <span className="font-display text-xs text-gray-500 w-16 truncate capitalize">{sport}</span>
+      <div className="flex-1 h-1 bg-brand-darkgray rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-700 ${barColor}`}
+          style={{ width: `${Math.min(pct, 100)}%` }}
+        />
+      </div>
+      <span className="font-display text-xs tabular-nums text-gray-600 w-8 text-right">
+        {pct}%
+      </span>
+    </div>
   )
 }
 
 export default function Sidebar({ isOpen = false, onClose }) {
   const location = useLocation()
   const [modelSummary, setModelSummary] = useState(null)
+  const { data: quota, loading: quotaLoading } = useQuota()
 
   useEffect(() => {
     getMetricsSummary()
@@ -71,6 +136,10 @@ export default function Sidebar({ isOpen = false, onClose }) {
 
   const searchSport = new URLSearchParams(location.search).get('sport') || ''
 
+  const mlWeights   = modelSummary?.ml_weights || {}
+  const nSamples    = modelSummary?.n_training_samples || {}
+  const hasMlData   = Object.keys(mlWeights).length > 0
+
   return (
     <aside className={`
       fixed top-[53px] left-0 z-50 w-56 h-[calc(100vh-53px)] overflow-y-auto
@@ -80,12 +149,12 @@ export default function Sidebar({ isOpen = false, onClose }) {
       md:translate-x-0 md:z-auto
     `}>
 
-      {/* Mobile-only close header */}
-      <div className="md:hidden flex items-center justify-between p-3 border-b border-brand-midgray">
-        <span className="font-display font-medium text-white">Menu</span>
+      {/* Mobile close */}
+      <div className="md:hidden flex items-center justify-between p-3 border-b border-brand-midgray shrink-0">
+        <span className="font-display text-xs text-white tracking-widest">MENU</span>
         <button
           onClick={onClose}
-          className="text-3xl leading-none text-gray-400 hover:text-white transition-colors"
+          className="text-2xl leading-none text-gray-500 hover:text-white transition-colors"
           aria-label="Close sidebar"
         >
           ×
@@ -93,35 +162,62 @@ export default function Sidebar({ isOpen = false, onClose }) {
       </div>
 
       {/* Navigation */}
-      <div className="p-3 border-b border-brand-midgray">
+      <div className="p-3 border-b border-brand-midgray shrink-0">
         <p className="label px-3 py-1.5 mb-1">NAVIGATION</p>
         <nav className="flex flex-col gap-0.5">
           {NAV_ITEMS.map(item => (
-            <NavItem
-              key={item.path}
-              {...item}
-              isActive={isActive(item.path)}
-            />
+            <NavItem key={item.path} {...item} isActive={isActive(item.path)} />
           ))}
         </nav>
       </div>
 
       {/* Sports quick-links */}
-      <div className="p-3 border-b border-brand-midgray">
+      <div className="p-3 border-b border-brand-midgray shrink-0">
         <p className="label px-3 py-1.5 mb-1">SPORTS</p>
         <div className="flex flex-col gap-0.5">
           {SPORTS.map(sport => (
-            <SportLink
+            <Link
               key={sport.key}
-              sport={sport}
-              isActive={location.pathname === '/history' && searchSport === sport.key}
-            />
+              to={`/history?sport=${sport.key}`}
+              className={`flex items-center justify-between px-3 py-1.5 rounded-sm transition-colors group ${
+                location.pathname === '/history' && searchSport === sport.key
+                  ? 'bg-brand-gray text-white'
+                  : 'text-gray-500 hover:text-white hover:bg-brand-gray'
+              }`}
+            >
+              <span className="font-body text-xs">{sport.label}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sport.dot} opacity-50 group-hover:opacity-100 transition-opacity`} />
+            </Link>
           ))}
         </div>
       </div>
 
-      {/* Model status block – unchanged */}
-      <div className="p-3 mt-auto">
+      {/* SerpAPI Quota */}
+      <QuotaBar quota={quota} loading={quotaLoading} />
+
+      {/* ML Weight per sport */}
+      {hasMlData && (
+        <div className="p-3 border-b border-brand-midgray shrink-0">
+          <p className="label px-0 py-1 mb-2">ML WEIGHT / SPORT</p>
+          <div className="flex flex-col gap-0.5 px-1">
+            {SPORTS.map(s => (
+              <MlWeightRow
+                key={s.key}
+                sport={s.key}
+                weight={mlWeights[s.key]}
+                nSamples={nSamples[s.key]}
+                dot={s.dot}
+              />
+            ))}
+          </div>
+          <p className="font-display text-xs text-gray-700 mt-2 px-1">
+            % trust in ML vs prior model
+          </p>
+        </div>
+      )}
+
+      {/* Model status */}
+      <div className="p-3 mt-auto shrink-0">
         <div className="card p-3">
           <p className="label mb-2">MODEL STATUS</p>
 
@@ -130,16 +226,18 @@ export default function Sidebar({ isOpen = false, onClose }) {
               <div className="flex items-center justify-between">
                 <span className="font-display text-xs text-gray-600">ENGINE</span>
                 <span className={`font-display text-xs ${
-                  modelSummary.is_trained ? 'text-brand-greenlight' : 'text-yellow-500'
+                  Object.values(modelSummary.is_trained || {}).some(Boolean)
+                    ? 'text-brand-greenlight' : 'text-yellow-500'
                 }`}>
-                  {modelSummary.is_trained ? 'ML TRAINED' : 'PRIOR MODE'}
+                  {Object.values(modelSummary.is_trained || {}).some(Boolean)
+                    ? 'ML ACTIVE' : 'PRIOR MODE'}
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
                 <span className="font-display text-xs text-gray-600">VERSION</span>
                 <span className="font-display text-xs text-gray-400">
-                  v{modelSummary.model_version || '1.0.0'}
+                  v{modelSummary.model_version || '3.0.0'}
                 </span>
               </div>
 
@@ -158,26 +256,22 @@ export default function Sidebar({ isOpen = false, onClose }) {
                 </div>
               )}
 
-              {modelSummary.total_predictions != null && (
-                <div className="flex items-center justify-between">
-                  <span className="font-display text-xs text-gray-600">TOTAL PREDS</span>
-                  <span className="font-display text-xs text-gray-400 tabular-nums">
-                    {modelSummary.total_predictions.toLocaleString()}
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center justify-between">
+                <span className="font-display text-xs text-gray-600">PREDICTIONS</span>
+                <span className="font-display text-xs text-gray-400 tabular-nums">
+                  {(modelSummary.total_predictions || 0).toLocaleString()}
+                </span>
+              </div>
 
-              {modelSummary.total_resolved != null && (
-                <div className="flex items-center justify-between">
-                  <span className="font-display text-xs text-gray-600">RESOLVED</span>
-                  <span className="font-display text-xs text-gray-400 tabular-nums">
-                    {modelSummary.total_resolved.toLocaleString()}
-                  </span>
-                </div>
-              )}
+              <div className="flex items-center justify-between">
+                <span className="font-display text-xs text-gray-600">RESOLVED</span>
+                <span className="font-display text-xs text-gray-400 tabular-nums">
+                  {(modelSummary.total_resolved || 0).toLocaleString()}
+                </span>
+              </div>
 
               {modelSummary.performance_metrics?.brier_score != null && (
-                <div className="pt-1 border-t border-brand-midgray mt-0.5">
+                <div className="pt-1.5 border-t border-brand-midgray">
                   <div className="flex items-center justify-between">
                     <span className="font-display text-xs text-gray-600">BRIER</span>
                     <span className={`font-display text-xs tabular-nums ${
@@ -199,23 +293,9 @@ export default function Sidebar({ isOpen = false, onClose }) {
                 <span className="font-display text-xs text-gray-600">ENGINE</span>
                 <span className="font-display text-xs text-brand-greenlight">OPERATIONAL</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="font-display text-xs text-gray-600">DATA</span>
-                <span className="font-display text-xs text-gray-700">LOADING...</span>
-              </div>
+              <div className="h-1.5 bg-brand-midgray rounded-full animate-pulse w-full mt-1" />
             </div>
           )}
-
-          <div className="pt-2 mt-2 border-t border-brand-midgray">
-            <p className="font-display text-xs text-gray-700 mb-1.5">SUPPORTED SPORTS</p>
-            <div className="flex flex-wrap gap-1">
-              {SPORTS.map(s => (
-                <span key={s.key} className="font-display text-xs text-gray-600 bg-brand-midgray px-1.5 py-0.5 rounded-sm capitalize">
-                  {s.key}
-                </span>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </aside>

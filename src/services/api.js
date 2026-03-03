@@ -34,7 +34,6 @@ export const getLiveLeagues = (sport) =>
 export const submitResult = (data) => api.post('/predictions/results/submit', data)
 export const triggerLearning = () => api.post('/predictions/learn/trigger')
 
-// Soft delete
 export const deletePrediction = (matchId) => api.delete(`/predictions/${matchId}`)
 export const restorePrediction = (matchId) => api.post(`/predictions/${matchId}/restore`)
 
@@ -42,6 +41,7 @@ export const restorePrediction = (matchId) => api.post(`/predictions/${matchId}/
 export const getMetrics = (limit = 30) => api.get('/metrics/', { params: { limit } })
 export const getLatestMetrics = () => api.get('/metrics/latest')
 export const getMetricsSummary = () => api.get('/metrics/summary')
+export const getQuota = () => api.get('/metrics/quota')
 
 // ── Results ───────────────────────────────────────────────────────────────────
 export const getResults = (limit = 50) => api.get('/results/', { params: { limit } })
