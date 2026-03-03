@@ -27,23 +27,14 @@ function DeleteSessionButton({ sessionId, isDeleted, onAction }) {
     e.stopPropagation()
     if (isDeleted) {
       setLoading(true)
-      try {
-        await restoreSession(sessionId)
-        onAction('restored')
-      } finally {
-        setLoading(false)
-      }
+      try { await restoreSession(sessionId); onAction('restored') }
+      finally { setLoading(false) }
       return
     }
     if (!confirming) { setConfirming(true); return }
     setLoading(true)
-    try {
-      await deleteSession(sessionId)
-      onAction('deleted')
-    } finally {
-      setLoading(false)
-      setConfirming(false)
-    }
+    try { await deleteSession(sessionId); onAction('deleted') }
+    finally { setLoading(false); setConfirming(false) }
   }
 
   if (isDeleted) {
@@ -75,85 +66,90 @@ function DeleteSessionButton({ sessionId, isDeleted, onAction }) {
 }
 
 function SessionCard({ session, onResume, onPreview, active, onAction }) {
-  const teams = [...new Set((session.teams_discussed || []).filter(Boolean))].slice(0, 4)
-  const sports = [...new Set((session.sports_discussed || []).filter(Boolean))].slice(0, 3)
-  const preds = (session.predictions_made || []).length
-  const msgs  = session.message_count || 0
+  const navigate  = useNavigate()
+  const teams     = [...new Set((session.teams_discussed || []).filter(Boolean))].slice(0, 4)
+  const sports    = [...new Set((session.sports_discussed || []).filter(Boolean))].slice(0, 3)
+  const preds     = (session.predictions_made || []).length
+  const msgs      = session.message_count || 0
   const isDeleted = !!session.deleted_at
 
   return (
     <div
-      className={`card p-4 border transition-all duration-150 ${
+      className={`card border transition-all duration-150 ${
         isDeleted
           ? 'opacity-50 border-brand-midgray'
           : active
-          ? 'border-brand-red bg-brand-reddark cursor-pointer'
-          : 'border-brand-midgray hover:border-gray-500 cursor-pointer'
+          ? 'border-brand-red bg-brand-reddark'
+          : 'border-brand-midgray hover:border-gray-500'
       }`}
-      onClick={() => !isDeleted && onPreview(session.session_id)}
     >
-      <div className="flex items-start justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full shrink-0 ${
-            isDeleted ? 'bg-brand-midgray'
-            : msgs > 0 ? 'bg-brand-green'
-            : 'bg-brand-midgray'
-          }`} />
-          <span className="font-display text-xs text-gray-400 truncate max-w-[150px]">
-            {session.session_id.slice(0, 8).toUpperCase()}...
+      {/* ── Clickable summary row ── */}
+      <div
+        className={`p-3 ${!isDeleted ? 'cursor-pointer' : ''}`}
+        onClick={() => !isDeleted && onPreview(session.session_id)}
+      >
+        {/* Top row: ID + time + delete */}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className={`w-2 h-2 rounded-full shrink-0 ${
+              isDeleted ? 'bg-brand-midgray' : msgs > 0 ? 'bg-brand-green' : 'bg-brand-midgray'
+            }`} />
+            <span className="font-display text-xs text-gray-400 truncate">
+              {session.session_id.slice(0, 8).toUpperCase()}...
+            </span>
+            {isDeleted && (
+              <span className="font-display text-xs text-gray-700 border border-brand-midgray px-1 rounded-sm shrink-0">
+                DEL
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-display text-xs text-gray-700">{timeAgo(session.updated_at)}</span>
+            <DeleteSessionButton
+              sessionId={session.session_id}
+              isDeleted={isDeleted}
+              onAction={onAction}
+            />
+          </div>
+        </div>
+
+        {/* Stats row */}
+        <div className="flex items-center gap-3 mb-2">
+          <span className="font-display text-xs text-gray-600">
+            MSGS <span className="text-white">{msgs}</span>
           </span>
-          {isDeleted && (
-            <span className="font-display text-xs text-gray-700 border border-brand-midgray px-1 rounded-sm">
-              DELETED
+          {preds > 0 && (
+            <span className="font-display text-xs text-gray-600">
+              PREDS <span className="text-brand-greenlight">{preds}</span>
+            </span>
+          )}
+          {sports.length > 0 && (
+            <span className="font-display text-xs text-gray-700 uppercase ml-auto">
+              {sports.join(' · ')}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <span className="font-display text-xs text-gray-700 shrink-0">
-            {timeAgo(session.updated_at)}
-          </span>
-          <DeleteSessionButton
-            sessionId={session.session_id}
-            isDeleted={isDeleted}
-            onAction={onAction}
-          />
-        </div>
-      </div>
 
-      <div className="flex items-center gap-3 mb-2">
-        <div>
-          <span className="font-display text-xs text-gray-600">MSGS </span>
-          <span className="font-display text-xs text-white">{msgs}</span>
-        </div>
-        {preds > 0 && (
-          <div>
-            <span className="font-display text-xs text-gray-600">PREDS </span>
-            <span className="font-display text-xs text-brand-greenlight">{preds}</span>
+        {/* Teams */}
+        {teams.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {teams.map(t => <span key={t} className="tag-gray text-xs">{t}</span>)}
           </div>
         )}
       </div>
 
-      {teams.length > 0 && (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {teams.map(t => <span key={t} className="tag-gray">{t}</span>)}
-        </div>
-      )}
-
-      {sports.length > 0 && (
-        <div className="flex gap-1 flex-wrap">
-          {sports.map(s => (
-            <span key={s} className="font-display text-xs text-gray-700 uppercase">{s}</span>
-          ))}
-        </div>
-      )}
-
+      {/* ── Resume button — always visible, full-width, outside click area ── */}
       {!isDeleted && (
-        <button
-          onClick={(e) => { e.stopPropagation(); onResume(session.session_id) }}
-          className="mt-3 w-full btn-primary text-xs py-1.5"
-        >
-          RESUME SESSION
-        </button>
+        <div className="px-3 pb-3">
+          <button
+            onClick={(e) => { e.stopPropagation(); onResume(session.session_id) }}
+            className="w-full font-display text-xs py-2 rounded-sm border border-brand-midgray text-gray-400
+                       hover:border-brand-red hover:text-white hover:bg-brand-reddark
+                       active:scale-[0.98] transition-all duration-150 flex items-center justify-center gap-2"
+          >
+            <span>▶</span> RESUME SESSION
+          </button>
+        </div>
       )}
     </div>
   )
@@ -166,7 +162,7 @@ function MessagePreview({ messages }) {
     </div>
   )
   return (
-    <div className="flex flex-col gap-3 max-h-[600px] overflow-y-auto pr-1">
+    <div className="flex flex-col gap-3 overflow-y-auto pr-1" style={{ maxHeight: 480 }}>
       {messages.map((msg, i) => {
         const isUser = msg.role === 'user'
         return (
@@ -177,7 +173,9 @@ function MessagePreview({ messages }) {
                   {isUser ? 'YOU' : '1/1 AI'}
                 </span>
                 <span className="font-display text-xs text-gray-700">
-                  {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                  {msg.timestamp
+                    ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : ''}
                 </span>
               </div>
               <div className={`rounded-sm p-3 text-sm font-body leading-relaxed ${
@@ -199,14 +197,15 @@ function MessagePreview({ messages }) {
 }
 
 export default function ChatHistoryPage() {
-  const navigate  = useNavigate()
-  const [sessions, setSessions]             = useState([])
-  const [loading, setLoading]               = useState(true)
-  const [selectedId, setSelectedId]         = useState(null)
+  const navigate = useNavigate()
+  const [sessions, setSessions]               = useState([])
+  const [loading, setLoading]                 = useState(true)
+  const [selectedId, setSelectedId]           = useState(null)
   const [previewMessages, setPreviewMessages] = useState([])
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [searchQuery, setSearchQuery]       = useState('')
-  const [showDeleted, setShowDeleted]       = useState(false)
+  const [previewLoading, setPreviewLoading]   = useState(false)
+  const [searchQuery, setSearchQuery]         = useState('')
+  const [showDeleted, setShowDeleted]         = useState(false)
+  const [showPreviewMobile, setShowPreviewMobile] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -223,8 +222,14 @@ export default function ChatHistoryPage() {
   useEffect(() => { load() }, [load])
 
   const handlePreview = async (sessionId) => {
-    if (selectedId === sessionId) { setSelectedId(null); setPreviewMessages([]); return }
+    if (selectedId === sessionId) {
+      setSelectedId(null)
+      setPreviewMessages([])
+      setShowPreviewMobile(false)
+      return
+    }
     setSelectedId(sessionId)
+    setShowPreviewMobile(true)
     setPreviewLoading(true)
     try {
       const res = await getSessionHistory(sessionId, 50)
@@ -236,7 +241,7 @@ export default function ChatHistoryPage() {
     }
   }
 
-  const handleAction = () => load()   // refresh on delete/restore
+  const handleAction = () => load()
 
   const filtered = sessions.filter(s => {
     if (!searchQuery) return true
@@ -256,6 +261,7 @@ export default function ChatHistoryPage() {
 
   return (
     <div className="animate-fade-in">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-xl text-white tracking-wide">CHAT HISTORY</h1>
@@ -267,12 +273,12 @@ export default function ChatHistoryPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
-          { label: 'SESSIONS', value: sessions.filter(s => !s.deleted_at).length },
-          { label: 'MESSAGES', value: totalMessages },
+          { label: 'SESSIONS',    value: sessions.filter(s => !s.deleted_at).length },
+          { label: 'MESSAGES',    value: totalMessages },
           { label: 'PREDICTIONS', value: totalPredictions },
-          { label: 'DELETED', value: deletedCount },
+          { label: 'DELETED',     value: deletedCount },
         ].map(({ label, value }) => (
           <div key={label} className="card p-3 text-center">
             <p className="label mb-1">{label}</p>
@@ -287,7 +293,8 @@ export default function ChatHistoryPage() {
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder="Search by team, sport, or session ID..."
-          className="flex-1 bg-brand-gray border border-brand-midgray focus:border-brand-red outline-none text-white font-body text-sm px-4 py-2 rounded-sm placeholder-gray-700 transition-colors"
+          className="flex-1 bg-brand-gray border border-brand-midgray focus:border-brand-red outline-none
+                     text-white font-body text-sm px-4 py-2 rounded-sm placeholder-gray-700 transition-colors"
         />
         <button
           onClick={() => setShowDeleted(v => !v)}
@@ -318,9 +325,17 @@ export default function ChatHistoryPage() {
           )}
         </div>
       ) : (
-        <div className="flex gap-4">
-          {/* Session list */}
-          <div className="flex flex-col gap-2 w-72 shrink-0 overflow-y-auto max-h-[calc(100vh-360px)]">
+        /* ── Responsive two-panel layout ── */
+        <div className="flex flex-col lg:flex-row gap-4">
+
+          {/* Session list — full width on mobile, fixed 280px on desktop */}
+          <div className={`
+            flex flex-col gap-2 overflow-y-auto
+            lg:w-72 lg:shrink-0
+            ${showPreviewMobile && selectedId ? 'hidden lg:flex' : 'flex'}
+          `}
+            style={{ maxHeight: 'calc(100vh - 320px)' }}
+          >
             {filtered.map(session => (
               <SessionCard
                 key={session.session_id}
@@ -333,37 +348,50 @@ export default function ChatHistoryPage() {
             ))}
           </div>
 
-          {/* Preview panel */}
-          <div className="flex-1 card p-4">
-            {!selectedId ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2">
-                <span className="font-display text-xs text-gray-600">SELECT A SESSION TO PREVIEW</span>
-              </div>
-            ) : previewLoading ? (
-              <div className="flex items-center justify-center h-40 gap-2">
-                <div className="w-4 h-4 border-2 border-brand-red border-t-transparent rounded-full animate-spin" />
-                <span className="font-display text-xs text-gray-500">LOADING MESSAGES...</span>
-              </div>
-            ) : (
-              <div>
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <p className="label">SESSION PREVIEW</p>
-                    <p className="font-display text-xs text-gray-700 mt-0.5">
-                      {selectedId.slice(0, 8).toUpperCase()}... · {previewMessages.length} messages
-                    </p>
-                  </div>
+          {/* Preview panel — always visible on desktop, overlay on mobile when session selected */}
+          <div className={`
+            flex-1 card p-4
+            ${selectedId && showPreviewMobile ? 'flex flex-col' : selectedId ? 'hidden lg:flex lg:flex-col' : 'hidden lg:flex lg:flex-col'}
+          `}>
+              {/* Panel header */}
+              <div className="flex items-center justify-between mb-4 gap-2">
+                <div className="min-w-0">
+                  <p className="label">SESSION PREVIEW</p>
+                  <p className="font-display text-xs text-gray-700 mt-0.5 truncate">
+                    {selectedId?.slice(0, 8).toUpperCase()}... · {previewMessages.length} messages
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Back button — mobile only */}
                   <button
-                    onClick={() => navigate(`/chat?session=${selectedId}`)}
+                    onClick={() => {
+                      setShowPreviewMobile(false)
+                      setSelectedId(null)
+                      setPreviewMessages([])
+                    }}
+                    className="lg:hidden font-display text-xs px-3 py-1.5 rounded-sm border
+                               border-brand-midgray text-gray-500 hover:text-white transition-colors"
+                  >
+                    ← BACK
+                  </button>
+                  <button
+                    onClick={() => selectedId && navigate(`/chat?session=${selectedId}`)}
                     className="btn-primary text-xs px-4 py-1.5"
                   >
                     RESUME →
                   </button>
                 </div>
-                <MessagePreview messages={previewMessages} />
               </div>
-            )}
-          </div>
+
+              {previewLoading ? (
+                <div className="flex items-center justify-center h-40 gap-2">
+                  <div className="w-4 h-4 border-2 border-brand-red border-t-transparent rounded-full animate-spin" />
+                  <span className="font-display text-xs text-gray-500">LOADING MESSAGES...</span>
+                </div>
+              ) : (
+                <MessagePreview messages={previewMessages} />
+              )}
+            </div>
         </div>
       )}
     </div>

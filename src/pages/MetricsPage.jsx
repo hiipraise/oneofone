@@ -133,13 +133,14 @@ function QuotaPanel({ quota, loading }) {
 }
 
 // ── Per-sport model detail table ──────────────────────────────────────────────
+// Drop-in replacement for the SportModelTable function in MetricsPage.jsx
+
 function SportModelTable({ summary }) {
   if (!summary) return null
   const mlWeights = summary.ml_weights || {}
   const nSamples  = summary.n_training_samples || {}
   const isTrained = summary.is_trained || {}
-
-  const sports = ['soccer', 'basketball', 'tennis']
+  const sports    = ['soccer', 'basketball', 'tennis']
 
   return (
     <div className="card overflow-hidden">
@@ -150,7 +151,7 @@ function SportModelTable({ summary }) {
         <table className="w-full">
           <thead className="bg-brand-darkgray border-b border-brand-midgray">
             <tr>
-              {['SPORT', 'STATUS', 'ML WEIGHT', 'TRAINING SAMPLES', 'CALIBRATION', 'EST. NEXT THRESHOLD'].map(h => (
+              {['SPORT', 'STATUS', 'ML WEIGHT', 'TRAINING SAMPLES', 'CALIBRATION', 'PROGRESS TO ML'].map(h => (
                 <th key={h} className="text-left label px-4 py-3">{h}</th>
               ))}
             </tr>
@@ -158,26 +159,41 @@ function SportModelTable({ summary }) {
           <tbody>
             {sports.map(sport => {
               const weight  = mlWeights[sport] ?? 0
-              const n       = nSamples[sport] ?? 0
+              const n       = nSamples[sport]  ?? 0
               const trained = isTrained[sport] ?? false
-              const cal     = n >= 100 ? 'isotonic' : n >= 30 ? 'sigmoid' : '—'
-              const wPct    = Math.round(weight * 100)
-              const nextN   = n < 30 ? 30 : n < 100 ? 100 : null
-              const nextLabel = nextN
-                ? `${nextN - n} more → ${nextN >= 100 ? 'isotonic' : 'ML active'}`
-                : 'Max calibration'
 
+              // Calibration: only meaningful once ML is active
+              const calLabel = n >= 100 ? 'isotonic' : n >= 30 ? 'sigmoid' : 'prior'
+              const calColor = n >= 100
+                ? 'text-brand-greenlight'
+                : n >= 30
+                ? 'text-yellow-400'
+                : 'text-gray-600'
+
+              // ML weight bar (only non-zero once n≥30)
+              const wPct     = Math.round(weight * 100)
               const barColor = wPct >= 60 ? 'bg-brand-green' : wPct >= 30 ? 'bg-yellow-500' : 'bg-brand-midgray'
               const wColor   = wPct >= 60 ? 'text-brand-greenlight' : wPct >= 30 ? 'text-yellow-400' : 'text-gray-600'
 
+              // Progress toward next threshold (30 → ML active, 100 → isotonic)
+              const nextThreshold = n < 30 ? 30 : n < 100 ? 100 : null
+              const progressPct   = nextThreshold ? Math.round((n / nextThreshold) * 100) : 100
+              const progressColor = n >= 100 ? 'bg-brand-green' : n >= 30 ? 'bg-yellow-500' : 'bg-blue-500'
+              const progressLabel = nextThreshold
+                ? `${nextThreshold - n} more → ${nextThreshold >= 100 ? 'isotonic' : 'ML active'}`
+                : 'Max calibration'
+
               return (
                 <tr key={sport} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
+                  {/* Sport */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${SPORT_DOTS[sport]}`} />
                       <span className="font-display text-xs text-white capitalize">{sport}</span>
                     </div>
                   </td>
+
+                  {/* Status badge */}
                   <td className="px-4 py-3">
                     <span className={`font-display text-xs px-2 py-0.5 rounded-sm border ${
                       trained
@@ -187,35 +203,58 @@ function SportModelTable({ summary }) {
                       {trained ? 'ML ACTIVE' : 'PRIOR MODE'}
                     </span>
                   </td>
+
+                  {/* ML weight bar */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 min-w-[100px]">
                       <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
                         <div
                           className={`h-full rounded-full ${barColor}`}
-                          style={{ width: `${wPct}%` }}
+                          style={{ width: wPct > 0 ? `${wPct}%` : '0%' }}
                         />
                       </div>
-                      <span className={`font-display text-xs tabular-nums w-8 ${wColor}`}>{wPct}%</span>
+                      <span className={`font-display text-xs tabular-nums w-8 ${wColor}`}>
+                        {wPct}%
+                      </span>
                     </div>
                   </td>
+
+                  {/* Training samples */}
                   <td className="px-4 py-3">
                     <span className={`font-display text-xs tabular-nums ${
-                      n >= 100 ? 'text-brand-greenlight' : n >= 30 ? 'text-yellow-400' : 'text-gray-600'
+                      n >= 100 ? 'text-brand-greenlight' : n >= 30 ? 'text-yellow-400' : 'text-gray-400'
                     }`}>
                       {n.toLocaleString()}
                     </span>
                   </td>
+
+                  {/* Calibration — shows method name or "prior" with clear colour */}
                   <td className="px-4 py-3">
-                    <span className={`font-display text-xs ${
-                      cal === 'isotonic' ? 'text-brand-greenlight'
-                        : cal === 'sigmoid' ? 'text-yellow-400'
-                        : 'text-gray-600'
-                    }`}>
-                      {cal}
+                    <span className={`font-display text-xs uppercase ${calColor}`}>
+                      {calLabel}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="font-display text-xs text-gray-600">{nextLabel}</span>
+
+                  {/* Progress bar toward next threshold */}
+                  <td className="px-4 py-3 min-w-[180px]">
+                    {nextThreshold ? (
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-700 ${progressColor}`}
+                              style={{ width: `${Math.min(progressPct, 100)}%` }}
+                            />
+                          </div>
+                          <span className="font-display text-xs text-gray-600 tabular-nums w-8 text-right">
+                            {progressPct}%
+                          </span>
+                        </div>
+                        <span className="font-display text-xs text-gray-600">{progressLabel}</span>
+                      </div>
+                    ) : (
+                      <span className="font-display text-xs text-brand-greenlight">Max calibration</span>
+                    )}
                   </td>
                 </tr>
               )

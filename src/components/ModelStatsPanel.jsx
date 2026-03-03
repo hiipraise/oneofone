@@ -1,9 +1,9 @@
 // src/components/ModelStatsPanel.jsx
 import React from 'react'
 
-function StatBlock({ label, value, sub, colorClass = 'text-white', wide = false }) {
+function StatBlock({ label, value, sub, colorClass = 'text-white' }) {
   return (
-    <div className={`p-4 border border-brand-midgray bg-brand-gray rounded-sm ${wide ? 'col-span-2' : ''}`}>
+    <div className="p-4 border border-brand-midgray bg-brand-gray rounded-sm">
       <p className="label mb-1">{label}</p>
       <p className={`font-display text-xl tabular-nums ${colorClass}`}>
         {value ?? <span className="text-gray-700">—</span>}
@@ -13,22 +13,77 @@ function StatBlock({ label, value, sub, colorClass = 'text-white', wide = false 
   )
 }
 
-// Mini bar for ML weight display
-function WeightBar({ sport, weight, dot }) {
-  const pct = Math.round((weight ?? 0) * 100)
-  const barColor = pct >= 60 ? 'bg-brand-green' : pct >= 30 ? 'bg-yellow-500' : 'bg-brand-midgray'
-  const textColor = pct >= 60 ? 'text-brand-greenlight' : pct >= 30 ? 'text-yellow-400' : 'text-gray-600'
+/**
+ * WeightBar — dual-mode:
+ *  • n < 30  → shows progress toward the 30-sample activation threshold (blue fill)
+ *  • n ≥ 30  → shows actual ML weight (green/yellow fill)
+ */
+function WeightBar({ sport, weight, nSamples, dot }) {
+  const n      = nSamples ?? 0
+  const wPct   = Math.round((weight ?? 0) * 100)
+  const active = n >= 30
+
+  // Progress-to-activation mode
+  const progressPct   = Math.min(Math.round((n / 30) * 100), 100)
+  const progressColor = 'bg-blue-500'
+
+  // ML weight mode
+  const mlBarColor  = wPct >= 60 ? 'bg-brand-green' : wPct >= 30 ? 'bg-yellow-500' : 'bg-yellow-500'
+  const mlTextColor = wPct >= 60 ? 'text-brand-greenlight' : wPct >= 30 ? 'text-yellow-400' : 'text-yellow-400'
+
+  const calLabel = n >= 100 ? 'isotonic' : n >= 30 ? 'sigmoid' : 'prior'
+
   return (
-    <div className="flex items-center gap-2">
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
-      <span className="font-display text-xs text-gray-500 w-20 capitalize">{sport}</span>
-      <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-700 ${barColor}`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
-        />
+    <div>
+      <div className="flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
+        <span className="font-display text-xs text-gray-500 w-20 capitalize">{sport}</span>
+
+        {/* Track */}
+        <div className="relative flex-1 h-2 bg-brand-darkgray rounded-full overflow-hidden border border-brand-midgray">
+          {active ? (
+            /* ML weight fill */
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${mlBarColor}`}
+              style={{ width: `${wPct}%` }}
+            />
+          ) : (
+            /* Progress-to-threshold fill */
+            <>
+              <div
+                className={`h-full rounded-full transition-all duration-700 ${progressColor} opacity-40`}
+                style={{ width: `${progressPct}%` }}
+              />
+              {/* Threshold marker at 100% */}
+              <div className="absolute right-0 top-0 w-px h-full bg-gray-600" />
+            </>
+          )}
+        </div>
+
+        {active ? (
+          <span className={`font-display text-xs tabular-nums w-10 text-right ${mlTextColor}`}>
+            {wPct}%
+          </span>
+        ) : (
+          <span className="font-display text-xs tabular-nums w-10 text-right text-blue-400">
+            {n}/30
+          </span>
+        )}
       </div>
-      <span className={`font-display text-xs tabular-nums w-10 text-right ${textColor}`}>{pct}%</span>
+
+      {/* Sub-label row */}
+      <div className="flex justify-between mt-1 pl-5">
+        <span className="font-display text-xs text-gray-700">
+          {active ? `${n} samples` : `${n} samples · ${30 - n} to activate`}
+        </span>
+        <span className={`font-display text-xs ${
+          calLabel === 'isotonic' ? 'text-brand-greenlight'
+          : calLabel === 'sigmoid' ? 'text-yellow-400'
+          : 'text-gray-700'
+        }`}>
+          {calLabel}
+        </span>
+      </div>
     </div>
   )
 }
@@ -50,10 +105,12 @@ function fmt4dp(v) { return v != null ? v.toFixed(4) : null }
 function fmtPct(v) { return v != null ? `${(v * 100).toFixed(1)}%` : null }
 
 const SPORT_DOTS = {
-  soccer: 'bg-brand-green',
+  soccer:     'bg-brand-green',
   basketball: 'bg-yellow-500',
-  tennis: 'bg-blue-500',
+  tennis:     'bg-blue-500',
 }
+
+const SPORTS = ['soccer', 'basketball', 'tennis']
 
 export default function ModelStatsPanel({ summary, loading }) {
   if (loading) return <Skeleton />
@@ -70,27 +127,26 @@ export default function ModelStatsPanel({ summary, loading }) {
   }
 
   const m          = summary.performance_metrics || {}
-  const mlWeights  = summary.ml_weights || {}
-  const nSamples   = summary.n_training_samples || {}
-  const hasMlData  = Object.keys(mlWeights).length > 0
+  const mlWeights  = summary.ml_weights          || {}
+  const nSamples   = summary.n_training_samples  || {}
   const totalSamples = Object.values(nSamples).reduce((s, v) => s + (v || 0), 0)
 
   const brierColor =
-    m.brier_score == null      ? 'text-gray-500'
-    : m.brier_score < 0.20    ? 'text-brand-greenlight'
-    : m.brier_score < 0.25    ? 'text-yellow-500'
+    m.brier_score == null   ? 'text-gray-500'
+    : m.brier_score < 0.20 ? 'text-brand-greenlight'
+    : m.brier_score < 0.25 ? 'text-yellow-500'
     : 'text-brand-redlight'
 
   const llColor =
-    m.log_loss == null         ? 'text-gray-500'
-    : m.log_loss < 0.55       ? 'text-brand-greenlight'
-    : m.log_loss < 0.70       ? 'text-yellow-500'
+    m.log_loss == null    ? 'text-gray-500'
+    : m.log_loss < 0.55  ? 'text-brand-greenlight'
+    : m.log_loss < 0.70  ? 'text-yellow-500'
     : 'text-brand-redlight'
 
   const accColor =
-    m.accuracy == null         ? 'text-gray-500'
-    : m.accuracy > 0.60       ? 'text-brand-greenlight'
-    : m.accuracy > 0.50       ? 'text-yellow-500'
+    m.accuracy == null    ? 'text-gray-500'
+    : m.accuracy > 0.60  ? 'text-brand-greenlight'
+    : m.accuracy > 0.50  ? 'text-yellow-500'
     : 'text-brand-redlight'
 
   const trainedSports = Object.entries(summary.is_trained || {})
@@ -99,61 +155,42 @@ export default function ModelStatsPanel({ summary, loading }) {
     ? `ML: ${trainedSports.join(', ')}`
     : 'Prior model'
 
-  // Overall ML weight = average across trained sports
-  const avgMlWeight = hasMlData
-    ? Object.values(mlWeights).reduce((s, v) => s + (v || 0), 0) / Object.values(mlWeights).length
+  const avgMlWeight = SPORTS.length > 0
+    ? SPORTS.reduce((s, sp) => s + (mlWeights[sp] || 0), 0) / SPORTS.length
     : null
+
+  // How many sports are still below threshold?
+  const sportsBelow30 = SPORTS.filter(s => (nSamples[s] ?? 0) < 30)
+  const anyActive     = trainedSports.length > 0
 
   return (
     <div className="space-y-3">
       {/* Primary metrics row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-3">
-        <StatBlock
-          label="BRIER SCORE"
-          value={fmt4dp(m.brier_score)}
-          sub="↓ Better (0=perfect)"
-          colorClass={brierColor}
-        />
-        <StatBlock
-          label="LOG LOSS"
-          value={fmt4dp(m.log_loss)}
-          sub="↓ Better"
-          colorClass={llColor}
-        />
+        <StatBlock label="BRIER SCORE"    value={fmt4dp(m.brier_score)}   sub="↓ Better (0=perfect)"    colorClass={brierColor} />
+        <StatBlock label="LOG LOSS"       value={fmt4dp(m.log_loss)}      sub="↓ Better"                colorClass={llColor} />
         <StatBlock
           label="CALIB. ERROR"
           value={fmtPct(m.calibration_error)}
           sub="Expected calib."
-          colorClass={
-            m.calibration_error != null && m.calibration_error < 0.05
-              ? 'text-brand-greenlight' : 'text-gray-400'
-          }
+          colorClass={m.calibration_error != null && m.calibration_error < 0.05 ? 'text-brand-greenlight' : 'text-gray-400'}
         />
-        <StatBlock
-          label="ACCURACY"
-          value={fmtPct(m.accuracy)}
-          sub="Binary classification"
-          colorClass={accColor}
-        />
-        <StatBlock
-          label="PREDICTIONS"
-          value={(summary.total_predictions ?? 0).toLocaleString()}
-          sub="All time"
-        />
+        <StatBlock label="ACCURACY"       value={fmtPct(m.accuracy)}      sub="Binary classification"   colorClass={accColor} />
+        <StatBlock label="PREDICTIONS"    value={(summary.total_predictions ?? 0).toLocaleString()} sub="All time" />
         <StatBlock
           label="RESOLVED"
           value={(summary.total_resolved ?? 0).toLocaleString()}
           sub={`v${summary.model_version || '3.0.0'}`}
-          colorClass={trainedSports.length > 0 ? 'text-brand-greenlight' : 'text-yellow-500'}
+          colorClass={anyActive ? 'text-brand-greenlight' : 'text-yellow-500'}
         />
         <StatBlock
           label="ML WEIGHT"
           value={avgMlWeight != null ? fmtPct(avgMlWeight) : '—'}
           sub="Avg ML vs prior trust"
           colorClass={
-            avgMlWeight == null      ? 'text-gray-500'
-            : avgMlWeight > 0.5     ? 'text-brand-greenlight'
-            : avgMlWeight > 0.2     ? 'text-yellow-500'
+            !avgMlWeight         ? 'text-gray-500'
+            : avgMlWeight > 0.5  ? 'text-brand-greenlight'
+            : avgMlWeight > 0.2  ? 'text-yellow-500'
             : 'text-gray-500'
           }
         />
@@ -165,44 +202,39 @@ export default function ModelStatsPanel({ summary, loading }) {
         />
       </div>
 
-      {/* Per-sport ML weight breakdown */}
-      {hasMlData && (
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="label">ML ENSEMBLE WEIGHT PER SPORT</p>
-            <p className="font-display text-xs text-gray-600">
-              higher = more ML, less prior
+      {/* Per-sport ML weight / progress breakdown — always shown */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <p className="label">ML ENSEMBLE WEIGHT PER SPORT</p>
+          <p className="font-display text-xs text-gray-600">
+            {anyActive ? 'higher = more ML, less prior' : 'building toward activation'}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          {SPORTS.map(sport => (
+            <WeightBar
+              key={sport}
+              sport={sport}
+              weight={mlWeights[sport] ?? 0}
+              nSamples={nSamples[sport] ?? 0}
+              dot={SPORT_DOTS[sport]}
+            />
+          ))}
+        </div>
+
+        {sportsBelow30.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-brand-midgray flex items-start gap-2">
+            <span className="text-yellow-500 text-xs shrink-0 mt-0.5">⚠</span>
+            <p className="font-display text-xs text-yellow-500">
+              {sportsBelow30.length === SPORTS.length
+                ? 'All sports need 30 resolved predictions to activate ML. Blue bars show progress.'
+                : `${sportsBelow30.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')} still building toward 30-sample threshold.`
+              }
             </p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {Object.entries(mlWeights).map(([sport, weight]) => (
-              <div key={sport}>
-                <WeightBar
-                  sport={sport}
-                  weight={weight}
-                  dot={SPORT_DOTS[sport] || 'bg-gray-500'}
-                />
-                <div className="flex justify-between mt-1 px-5">
-                  <span className="font-display text-xs text-gray-700">
-                    {nSamples[sport] ?? 0} training samples
-                  </span>
-                  <span className="font-display text-xs text-gray-700">
-                    {nSamples[sport] >= 100 ? 'isotonic' : nSamples[sport] >= 30 ? 'sigmoid' : 'prior'}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-          {totalSamples < 30 && (
-            <div className="mt-3 pt-3 border-t border-brand-midgray">
-              <p className="font-display text-xs text-yellow-500">
-                ⚠ Need at least 30 resolved predictions per sport to activate ML model.
-                Currently in statistical prior mode.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
     </div>
   )
 }

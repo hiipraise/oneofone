@@ -5,18 +5,18 @@ import { getMetricsSummary } from '../services/api'
 import { useQuota } from '../hooks/useData'
 
 const NAV_ITEMS = [
-  { path: '/',             label: 'Dashboard',     icon: '◈' },
+  { path: '/',             label: 'Dashboard',      icon: '◈' },
   { path: '/predict',      label: 'New Prediction', icon: '⊕' },
-  { path: '/history',      label: 'History',       icon: '≡' },
-  { path: '/metrics',      label: 'Model Metrics', icon: '◎' },
-  { path: '/chat',         label: 'AI Chat',       icon: '⌘' },
-  { path: '/chat/history', label: 'Chat History',  icon: '◷' },
+  { path: '/history',      label: 'History',        icon: '≡' },
+  { path: '/metrics',      label: 'Model Metrics',  icon: '◎' },
+  { path: '/chat',         label: 'AI Chat',        icon: '⌘' },
+  { path: '/chat/history', label: 'Chat History',   icon: '◷' },
 ]
 
 const SPORTS = [
-  { key: 'soccer',     label: 'Football',  dot: 'bg-brand-green' },
-  { key: 'basketball', label: 'Basketball', dot: 'bg-yellow-500' },
-  { key: 'tennis',     label: 'Tennis',    dot: 'bg-blue-500' },
+  { key: 'soccer',     label: 'Football',   dot: 'bg-brand-green'  },
+  { key: 'basketball', label: 'Basketball', dot: 'bg-yellow-500'   },
+  { key: 'tennis',     label: 'Tennis',     dot: 'bg-blue-500'     },
 ]
 
 function NavItem({ path, label, icon, isActive }) {
@@ -53,16 +53,10 @@ function QuotaBar({ quota, loading }) {
   }
   if (!quota) return null
 
-  const pct = Math.round((quota.used / quota.budget) * 100)
+  const pct       = Math.round((quota.used / quota.budget) * 100)
   const remaining = quota.remaining ?? (quota.budget - quota.used)
-  const barColor =
-    pct >= 90 ? 'bg-brand-red' :
-    pct >= 70 ? 'bg-yellow-500' :
-    'bg-brand-green'
-  const textColor =
-    pct >= 90 ? 'text-brand-redlight' :
-    pct >= 70 ? 'text-yellow-400' :
-    'text-brand-greenlight'
+  const barColor  = pct >= 90 ? 'bg-brand-red'  : pct >= 70 ? 'bg-yellow-500' : 'bg-brand-green'
+  const textColor = pct >= 90 ? 'text-brand-redlight' : pct >= 70 ? 'text-yellow-400' : 'text-brand-greenlight'
 
   return (
     <div className="p-3 border-b border-brand-midgray">
@@ -97,7 +91,7 @@ function QuotaBar({ quota, loading }) {
 
 // ── ML weight row ─────────────────────────────────────────────────────────────
 function MlWeightRow({ sport, weight, nSamples, dot }) {
-  const w = weight ?? 0
+  const w   = weight ?? 0
   const pct = Math.round(w * 100)
   const barColor = pct >= 60 ? 'bg-brand-green' : pct >= 30 ? 'bg-yellow-500' : 'bg-brand-midgray'
   return (
@@ -120,25 +114,31 @@ function MlWeightRow({ sport, weight, nSamples, dot }) {
 export default function Sidebar({ isOpen = false, onClose }) {
   const location = useLocation()
   const [modelSummary, setModelSummary] = useState(null)
+  const [summaryError, setSummaryError] = useState(false)
   const { data: quota, loading: quotaLoading } = useQuota()
 
   useEffect(() => {
+    setSummaryError(false)
     getMetricsSummary()
-      .then(r => setModelSummary(r.data))
-      .catch(() => {})
+      .then(r => setModelSummary(r.data ?? null))
+      .catch(err => {
+        console.error('[Sidebar] metrics/summary failed:', err)
+        setSummaryError(true)
+      })
   }, [])
 
   const isActive = (path) => {
-    if (path === '/') return location.pathname === '/'
+    if (path === '/')     return location.pathname === '/'
     if (path === '/chat') return location.pathname === '/chat'
     return location.pathname.startsWith(path)
   }
 
   const searchSport = new URLSearchParams(location.search).get('sport') || ''
 
-  const mlWeights   = modelSummary?.ml_weights || {}
-  const nSamples    = modelSummary?.n_training_samples || {}
-  const hasMlData   = Object.keys(mlWeights).length > 0
+  // Always fall back to explicit per-sport objects so renders are stable
+  const mlWeights = modelSummary?.ml_weights        ?? { soccer: 0, basketball: 0, tennis: 0 }
+  const nSamples  = modelSummary?.n_training_samples ?? { soccer: 0, basketball: 0, tennis: 0 }
+  const isTrained = modelSummary?.is_trained         ?? { soccer: false, basketball: false, tennis: false }
 
   return (
     <aside className={`
@@ -156,9 +156,7 @@ export default function Sidebar({ isOpen = false, onClose }) {
           onClick={onClose}
           className="text-2xl leading-none text-gray-500 hover:text-white transition-colors"
           aria-label="Close sidebar"
-        >
-          ×
-        </button>
+        >×</button>
       </div>
 
       {/* Navigation */}
@@ -195,10 +193,19 @@ export default function Sidebar({ isOpen = false, onClose }) {
       {/* SerpAPI Quota */}
       <QuotaBar quota={quota} loading={quotaLoading} />
 
-      {/* ML Weight per sport */}
-      {hasMlData && (
-        <div className="p-3 border-b border-brand-midgray shrink-0">
-          <p className="label px-0 py-1 mb-2">ML WEIGHT / SPORT</p>
+      {/* ML Weight per sport — always render once summary attempted (even with zeros) */}
+      <div className="p-3 border-b border-brand-midgray shrink-0">
+        <p className="label px-0 py-1 mb-2">ML WEIGHT / SPORT</p>
+        {summaryError ? (
+          <p className="font-display text-xs text-gray-700 px-1">Unavailable</p>
+        ) : !modelSummary ? (
+          /* skeleton while loading */
+          <div className="flex flex-col gap-2 px-1">
+            {SPORTS.map(s => (
+              <div key={s.key} className="h-3 bg-brand-midgray rounded animate-pulse" />
+            ))}
+          </div>
+        ) : (
           <div className="flex flex-col gap-0.5 px-1">
             {SPORTS.map(s => (
               <MlWeightRow
@@ -209,12 +216,12 @@ export default function Sidebar({ isOpen = false, onClose }) {
                 dot={s.dot}
               />
             ))}
+            <p className="font-display text-xs text-gray-700 mt-2">
+              % trust in ML vs prior model
+            </p>
           </div>
-          <p className="font-display text-xs text-gray-700 mt-2 px-1">
-            % trust in ML vs prior model
-          </p>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Model status */}
       <div className="p-3 mt-auto shrink-0">
@@ -226,11 +233,10 @@ export default function Sidebar({ isOpen = false, onClose }) {
               <div className="flex items-center justify-between">
                 <span className="font-display text-xs text-gray-600">ENGINE</span>
                 <span className={`font-display text-xs ${
-                  Object.values(modelSummary.is_trained || {}).some(Boolean)
+                  Object.values(isTrained).some(Boolean)
                     ? 'text-brand-greenlight' : 'text-yellow-500'
                 }`}>
-                  {Object.values(modelSummary.is_trained || {}).some(Boolean)
-                    ? 'ML ACTIVE' : 'PRIOR MODE'}
+                  {Object.values(isTrained).some(Boolean) ? 'ML ACTIVE' : 'PRIOR MODE'}
                 </span>
               </div>
 
@@ -268,6 +274,28 @@ export default function Sidebar({ isOpen = false, onClose }) {
                 <span className="font-display text-xs text-gray-400 tabular-nums">
                   {(modelSummary.total_resolved || 0).toLocaleString()}
                 </span>
+              </div>
+
+              {/* Per-sport sample counts */}
+              <div className="pt-1.5 border-t border-brand-midgray">
+                <p className="font-display text-xs text-gray-600 mb-1">TRAINING SAMPLES</p>
+                {SPORTS.map(s => (
+                  <div key={s.key} className="flex items-center justify-between py-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+                      <span className="font-display text-xs text-gray-600 capitalize">{s.key}</span>
+                    </div>
+                    <span className={`font-display text-xs tabular-nums ${
+                      (nSamples[s.key] ?? 0) >= 100
+                        ? 'text-brand-greenlight'
+                        : (nSamples[s.key] ?? 0) >= 30
+                        ? 'text-yellow-400'
+                        : 'text-gray-600'
+                    }`}>
+                      {(nSamples[s.key] ?? 0).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
               </div>
 
               {modelSummary.performance_metrics?.brier_score != null && (
