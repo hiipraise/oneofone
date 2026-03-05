@@ -75,6 +75,8 @@ export default function PredictionTable({ predictions = [], showSport = true, on
   const [sortDir, setSortDir] = useState('desc')
   const [localPreds, setLocalPreds] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
 
   const items = localPreds ?? predictions
 
@@ -88,9 +90,21 @@ export default function PredictionTable({ predictions = [], showSport = true, on
     return sortDir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
   })
 
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize))
+  const safePage = Math.min(currentPage, totalPages)
+  const startIndex = (safePage - 1) * pageSize
+  const paginated = sorted.slice(startIndex, startIndex + pageSize)
+
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('desc') }
+    setCurrentPage(1)
+    setExpandedId(null)
+  }
+
+  const goToPage = (nextPage) => {
+    setCurrentPage(Math.max(1, Math.min(totalPages, nextPage)))
+    setExpandedId(null)
   }
 
   const Col = ({ label, k, className = '' }) => (
@@ -130,7 +144,7 @@ export default function PredictionTable({ predictions = [], showSport = true, on
             </tr>
           </thead>
           <tbody>
-            {sorted.map((pred, i) => {
+            {paginated.map((pred, i) => {
               const isExpanded = expandedId === pred.match_id
               const shortId = pred.match_id
                 ? pred.match_id.split('-').slice(0, 2).join('-').toUpperCase()
@@ -139,7 +153,7 @@ export default function PredictionTable({ predictions = [], showSport = true, on
               const isAway = pred.predicted_outcome === 'away_win'
 
               return (
-                <React.Fragment key={pred.match_id || i}>
+                <React.Fragment key={pred.match_id || `${startIndex + i}`}>
                   <tr
                     onClick={() => setExpandedId(isExpanded ? null : pred.match_id)}
                     className="border-b border-brand-midgray hover:bg-brand-gray transition-colors duration-100 cursor-pointer"
@@ -239,8 +253,28 @@ export default function PredictionTable({ predictions = [], showSport = true, on
       </div>
 
       <div className="px-4 py-2 border-t border-brand-midgray flex items-center justify-between">
-        <span className="font-display text-xs text-gray-700">{items.length} PREDICTIONS</span>
-        <span className="font-display text-xs text-gray-700">CLICK ROW TO EXPAND · ✕ TO DELETE</span>
+        <div className="font-display text-xs text-gray-700">
+          {startIndex + 1}–{Math.min(startIndex + pageSize, sorted.length)} of {sorted.length} PREDICTIONS
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => goToPage(safePage - 1)}
+            disabled={safePage === 1}
+            className="font-display text-xs px-2 py-1 rounded-sm border border-brand-midgray text-gray-600 disabled:opacity-40"
+          >
+            PREV
+          </button>
+          <span className="font-display text-xs text-gray-700">PAGE {safePage}/{totalPages}</span>
+          <button
+            onClick={() => goToPage(safePage + 1)}
+            disabled={safePage === totalPages}
+            className="font-display text-xs px-2 py-1 rounded-sm border border-brand-midgray text-gray-600 disabled:opacity-40"
+          >
+            NEXT
+          </button>
+          <span className="font-display text-xs text-gray-700 hidden sm:inline">CLICK ROW TO EXPAND · ✕ TO DELETE</span>
+        </div>
       </div>
     </div>
   )
