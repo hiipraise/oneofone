@@ -73,6 +73,16 @@ export default function PredictionCard({ prediction }) {
   } = prediction
 
   const bttsData = extended_markets?.btts ?? null
+  const normalizedDataSources = (data_sources || []).filter(Boolean).map((src) => {
+    if (typeof src === 'string') {
+      return { title: src, link: src, source: null }
+    }
+    return {
+      title: src.title || src.link || src.source || 'Source',
+      link: src.link || '',
+      source: src.source || null,
+    }
+  })
 
   // Which bar is the predicted winner?
   const winnerIs = predicted_outcome   // "home_win" | "away_win" | "draw"
@@ -226,13 +236,39 @@ export default function PredictionCard({ prediction }) {
           )}
 
           {/* Data sources */}
-          {data_sources?.length > 0 && (
+          {normalizedDataSources.length > 0 && (
             <div>
               <p className="label mb-1">DATA SOURCES</p>
-              <div className="flex flex-wrap gap-1">
-                {data_sources.map((src, i) => (
-                  <span key={i} className="tag-gray">{src}</span>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                {normalizedDataSources.map((src, i) => {
+                  const hasLink = Boolean(src.link)
+                  const safeLink = hasLink
+                    ? (src.link.startsWith('http') ? src.link : `https://${src.link}`)
+                    : null
+
+                  return (
+                    <div key={`${src.title}-${i}`} className="inline-flex items-center gap-1">
+                      {hasLink ? (
+                        <a
+                          href={safeLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tag-gray hover:text-brand-red transition-colors"
+                          title={src.title}
+                        >
+                          {src.title}
+                        </a>
+                      ) : (
+                        <span className="tag-gray">{src.title}</span>
+                      )}
+                      {src.source && (
+                        <span className="font-display text-[10px] uppercase tracking-wide text-gray-600 border border-brand-midgray px-1 py-0.5 rounded-sm">
+                          Source: {src.source}
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}

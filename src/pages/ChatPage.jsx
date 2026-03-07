@@ -17,6 +17,17 @@ const PROMPT_SUGGESTIONS = {
 // ─── Single message bubble ────────────────────────────────────────────────────
 function Message({ msg }) {
   const isUser = msg.role === 'user'
+  const normalizedSources = (msg.sources || []).filter(Boolean).slice(0, 3).map((src) => {
+    if (typeof src === 'string') {
+      return { title: src, link: src, source: null }
+    }
+    return {
+      title: src.title || src.link || 'Source',
+      link: src.link || '',
+      source: src.source || null,
+    }
+  })
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-slide-up`}>
       <div className={`max-w-[82%] ${isUser ? 'order-2' : 'order-1'}`}>
@@ -45,18 +56,28 @@ function Message({ msg }) {
           </div>
         )}
 
-        {msg.sources?.length > 0 && (
+        {normalizedSources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1">
-            {msg.sources.filter(Boolean).slice(0, 3).map((src, i) => (
-              <a
-                key={i}
-                href={src.startsWith('http') ? src : `https://${src}`}
-                target="_blank" rel="noopener noreferrer"
-                className="font-display text-xs text-gray-700 hover:text-brand-red transition-colors"
-              >
-                [src {i + 1}]
-              </a>
-            ))}
+            {normalizedSources.map((src, i) => {
+              const safeLink = src.link.startsWith('http') ? src.link : `https://${src.link}`
+              return (
+                <div key={`${src.link}-${i}`} className="inline-flex items-center gap-1">
+                  <a
+                    href={safeLink}
+                    target="_blank" rel="noopener noreferrer"
+                    className="font-display text-xs text-gray-700 hover:text-brand-red transition-colors"
+                    title={src.title}
+                  >
+                    [src {i + 1}]
+                  </a>
+                  {src.source && (
+                    <span className="font-display text-[10px] uppercase tracking-wide text-gray-600 border border-brand-midgray px-1 py-0.5 rounded-sm">
+                      Source: {src.source}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
