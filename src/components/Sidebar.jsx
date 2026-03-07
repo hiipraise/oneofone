@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { path: '/predict',      label: 'New Prediction', icon: '⊕' },
   { path: '/history',      label: 'History',        icon: '≡' },
   { path: '/metrics',      label: 'Model Metrics',  icon: '◎' },
+  { path: '/scheduler',    label: 'Scheduler',      icon: '⏱' },
   { path: '/chat',         label: 'AI Chat',        icon: '⌘' },
   { path: '/chat/history', label: 'Chat History',   icon: '◷' },
 ]
@@ -42,7 +43,7 @@ function NavItem({ path, label, icon, isActive }) {
   )
 }
 
-// ── Quota bar ──────────────────────────────────────────────────────────────────
+// ── Serper.dev / Search quota bar ─────────────────────────────────────────────
 function QuotaBar({ quota, loading }) {
   if (loading) {
     return (
@@ -61,6 +62,7 @@ function QuotaBar({ quota, loading }) {
   return (
     <div className="p-3 border-b border-brand-midgray">
       <div className="flex items-center justify-between mb-1.5">
+        {/* Updated label — reflects Serper.dev */}
         <p className="label">SEARCH QUOTA</p>
         <span className={`font-display text-xs tabular-nums ${textColor}`}>
           {quota.used}/{quota.budget}
@@ -74,7 +76,7 @@ function QuotaBar({ quota, loading }) {
       </div>
       <div className="flex items-center justify-between mt-1">
         <span className="font-display text-xs text-gray-700">
-          {quota.month || 'this month'}
+          serper.dev · {quota.month || 'this month'}
         </span>
         <span className={`font-display text-xs ${textColor}`}>
           {remaining} left
@@ -135,8 +137,7 @@ export default function Sidebar({ isOpen = false, onClose }) {
 
   const searchSport = new URLSearchParams(location.search).get('sport') || ''
 
-  // Always fall back to explicit per-sport objects so renders are stable
-  const mlWeights = modelSummary?.ml_weights        ?? { soccer: 0, basketball: 0, tennis: 0 }
+  const mlWeights = modelSummary?.ml_weights         ?? { soccer: 0, basketball: 0, tennis: 0 }
   const nSamples  = modelSummary?.n_training_samples ?? { soccer: 0, basketball: 0, tennis: 0 }
   const isTrained = modelSummary?.is_trained         ?? { soccer: false, basketball: false, tennis: false }
 
@@ -190,16 +191,15 @@ export default function Sidebar({ isOpen = false, onClose }) {
         </div>
       </div>
 
-      {/* SerpAPI Quota */}
+      {/* Serper.dev / Search quota */}
       <QuotaBar quota={quota} loading={quotaLoading} />
 
-      {/* ML Weight per sport — always render once summary attempted (even with zeros) */}
+      {/* ML Weight per sport */}
       <div className="p-3 border-b border-brand-midgray shrink-0">
         <p className="label px-0 py-1 mb-2">ML WEIGHT / SPORT</p>
         {summaryError ? (
           <p className="font-display text-xs text-gray-700 px-1">Unavailable</p>
         ) : !modelSummary ? (
-          /* skeleton while loading */
           <div className="flex flex-col gap-2 px-1">
             {SPORTS.map(s => (
               <div key={s.key} className="h-3 bg-brand-midgray rounded animate-pulse" />

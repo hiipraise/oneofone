@@ -1,18 +1,28 @@
 // src/pages/MetricsPage.jsx
 import React, { useState } from 'react'
-import { useMetricsSummary, useMetricsHistory, usePredictions, useResults, useQuota } from '../hooks/useData'
-import ModelStatsPanel from '../components/ModelStatsPanel'
+import { useMetricsSummary, useMetricsHistory, useQuota } from '../hooks/useData'
 import PerformanceChart from '../charts/PerformanceChart'
 import CalibrationChart from '../charts/CalibrationChart'
-import { triggerLearning } from '../services/api'
 
+const SPORTS = ['soccer', 'basketball', 'tennis']
 const SPORT_DOTS = {
   soccer:     'bg-brand-green',
   basketball: 'bg-yellow-500',
   tennis:     'bg-blue-500',
 }
 
-// ── Quota panel ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmt(v, digits = 4) {
+  if (v == null) return '—'
+  return Number(v).toFixed(digits)
+}
+
+function pctFmt(v) {
+  if (v == null) return '—'
+  return `${(v * 100).toFixed(1)}%`
+}
+
+// ── Quota panel (Serper.dev) ──────────────────────────────────────────────────
 function QuotaPanel({ quota, loading }) {
   if (loading) {
     return (
@@ -27,15 +37,15 @@ function QuotaPanel({ quota, loading }) {
   if (!quota) {
     return (
       <div className="card p-5">
-        <p className="label mb-2">SERPAPI SEARCH QUOTA</p>
+        <p className="label mb-2">SEARCH QUOTA — SERPER.DEV</p>
         <p className="font-display text-xs text-gray-600">Quota data unavailable</p>
       </div>
     )
   }
 
-  const pct = Math.round((quota.used / quota.budget) * 100)
+  const pct       = Math.round((quota.used / quota.budget) * 100)
   const remaining = quota.remaining ?? (quota.budget - quota.used)
-  const barColor =
+  const barColor  =
     pct >= 90 ? 'bg-brand-red' :
     pct >= 70 ? 'bg-yellow-500' :
     'bg-brand-green'
@@ -48,16 +58,15 @@ function QuotaPanel({ quota, loading }) {
     pct >= 70 ? '▲ MODERATE' :
     '✓ HEALTHY'
 
-  // Per-prediction cost: 3 SerpAPI calls per prediction (after optimization)
   const predsRemaining = Math.floor(remaining / 3)
 
   return (
     <div className="card p-5">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <p className="label mb-0.5">SERPAPI SEARCH QUOTA</p>
+          <p className="label mb-0.5">SEARCH QUOTA — SERPER.DEV</p>
           <p className="font-body text-xs text-gray-600">
-            Monthly budget · resets {quota.month ? `end of ${quota.month}` : 'monthly'}
+            2,400 searches/month (free plan) · resets {quota.month ? `end of ${quota.month}` : 'monthly'}
           </p>
         </div>
         <span className={`font-display text-xs px-2 py-1 rounded-sm border ${
@@ -88,7 +97,7 @@ function QuotaPanel({ quota, loading }) {
         </div>
         <div className="flex items-center justify-between mt-1.5">
           <span className="font-display text-xs text-gray-700">0</span>
-          <span className="font-display text-xs text-gray-700">{quota.budget}</span>
+          <span className="font-display text-xs text-gray-700">{quota.budget.toLocaleString()}</span>
         </div>
       </div>
 
@@ -101,30 +110,38 @@ function QuotaPanel({ quota, loading }) {
         </div>
         <div className="bg-brand-darkgray border border-brand-midgray rounded-sm p-3 text-center">
           <p className="label mb-1">REMAINING</p>
-          <p className={`font-display text-lg tabular-nums ${statusColor}`}>{remaining}</p>
+          <p className={`font-display text-lg tabular-nums ${statusColor}`}>{remaining.toLocaleString()}</p>
           <p className="font-display text-xs text-gray-700 mt-0.5">searches left</p>
         </div>
         <div className="bg-brand-darkgray border border-brand-midgray rounded-sm p-3 text-center">
           <p className="label mb-1">PREDICTIONS</p>
           <p className={`font-display text-lg tabular-nums ${
-            predsRemaining > 20 ? 'text-brand-greenlight' : predsRemaining > 5 ? 'text-yellow-400' : 'text-brand-redlight'
+            predsRemaining > 200 ? 'text-brand-greenlight' : predsRemaining > 50 ? 'text-yellow-400' : 'text-brand-redlight'
           }`}>
-            ~{predsRemaining}
+            ~{predsRemaining.toLocaleString()}
           </p>
           <p className="font-display text-xs text-gray-700 mt-0.5">remaining (3 calls ea)</p>
         </div>
       </div>
 
+      {/* DuckDuckGo fallback note */}
+      <div className="mt-4 rounded-sm p-3 border border-brand-midgray bg-brand-darkgray">
+        <p className="font-display text-xs text-gray-600">
+          DuckDuckGo fallback activates automatically when budget is exhausted — predictions
+          continue with slightly reduced context quality.
+        </p>
+      </div>
+
       {pct >= 70 && (
-        <div className={`mt-4 rounded-sm p-3 border ${
+        <div className={`mt-3 rounded-sm p-3 border ${
           pct >= 90
             ? 'bg-brand-reddark border-brand-red'
             : 'bg-yellow-900/20 border-yellow-800'
         }`}>
           <p className={`font-display text-xs ${pct >= 90 ? 'text-brand-redlight' : 'text-yellow-400'}`}>
             {pct >= 90
-              ? 'Budget nearly exhausted. Predictions will use ESPN + Odds API only (no SerpAPI text mining). Accuracy may decrease.'
-              : 'Budget running low. Consider caching aggressively or reducing daily scheduler frequency.'}
+              ? 'Serper.dev budget nearly exhausted. DuckDuckGo fallback is now active for all searches.'
+              : 'Budget running low. RapidAPI structured data will reduce search consumption automatically.'}
           </p>
         </div>
       )}
@@ -132,129 +149,117 @@ function QuotaPanel({ quota, loading }) {
   )
 }
 
-// ── Per-sport model detail table ──────────────────────────────────────────────
-// Drop-in replacement for the SportModelTable function in MetricsPage.jsx
+// ── Summary stat block ────────────────────────────────────────────────────────
+function StatBlock({ label, value, sub, color = 'text-white' }) {
+  return (
+    <div className="card p-4">
+      <p className="label mb-1">{label}</p>
+      <p className={`font-display text-2xl tabular-nums ${color}`}>{value ?? '—'}</p>
+      {sub && <p className="font-display text-xs text-gray-600 mt-0.5">{sub}</p>}
+    </div>
+  )
+}
 
+// ── Per-sport model table ─────────────────────────────────────────────────────
 function SportModelTable({ summary }) {
   if (!summary) return null
-  const mlWeights = summary.ml_weights || {}
-  const nSamples  = summary.n_training_samples || {}
-  const isTrained = summary.is_trained || {}
-  const sports    = ['soccer', 'basketball', 'tennis']
+
+  const mlWeights = summary.ml_weights         ?? {}
+  const nSamples  = summary.n_training_samples ?? {}
+  const isTrained = summary.is_trained         ?? {}
+  const perSport  = summary.per_sport_metrics  ?? {}
 
   return (
     <div className="card overflow-hidden">
       <div className="px-4 py-3 border-b border-brand-midgray">
-        <p className="label">PER-SPORT MODEL BREAKDOWN</p>
+        <p className="label">PER-SPORT MODEL STATUS</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full">
-          <thead className="bg-brand-darkgray border-b border-brand-midgray">
+          <thead className="border-b border-brand-midgray bg-brand-darkgray">
             <tr>
-              {['SPORT', 'STATUS', 'ML WEIGHT', 'TRAINING SAMPLES', 'CALIBRATION', 'PROGRESS TO ML'].map(h => (
+              {['SPORT', 'STATUS', 'SAMPLES', 'ML WEIGHT', 'ACCURACY', 'BRIER', 'LOG LOSS'].map(h => (
                 <th key={h} className="text-left label px-4 py-3">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {sports.map(sport => {
-              const weight  = mlWeights[sport] ?? 0
-              const n       = nSamples[sport]  ?? 0
-              const trained = isTrained[sport] ?? false
-
-              // Calibration: only meaningful once ML is active
-              const calLabel = n >= 100 ? 'isotonic' : n >= 30 ? 'sigmoid' : 'prior'
-              const calColor = n >= 100
-                ? 'text-brand-greenlight'
-                : n >= 30
-                ? 'text-yellow-400'
-                : 'text-gray-600'
-
-              // ML weight bar (only non-zero once n≥30)
-              const wPct     = Math.round(weight * 100)
-              const barColor = wPct >= 60 ? 'bg-brand-green' : wPct >= 30 ? 'bg-yellow-500' : 'bg-brand-midgray'
-              const wColor   = wPct >= 60 ? 'text-brand-greenlight' : wPct >= 30 ? 'text-yellow-400' : 'text-gray-600'
-
-              // Progress toward next threshold (30 → ML active, 100 → isotonic)
-              const nextThreshold = n < 30 ? 30 : n < 100 ? 100 : null
-              const progressPct   = nextThreshold ? Math.round((n / nextThreshold) * 100) : 100
-              const progressColor = n >= 100 ? 'bg-brand-green' : n >= 30 ? 'bg-yellow-500' : 'bg-blue-500'
-              const progressLabel = nextThreshold
-                ? `${nextThreshold - n} more → ${nextThreshold >= 100 ? 'isotonic' : 'ML active'}`
-                : 'Max calibration'
+            {SPORTS.map(sport => {
+              const trained   = isTrained[sport] ?? false
+              const weight    = mlWeights[sport]  ?? 0
+              const samples   = nSamples[sport]   ?? 0
+              const sm        = perSport[sport]   ?? {}
+              const accuracy  = sm.accuracy
+              const brier     = sm.brier_score
+              const logLoss   = sm.log_loss
 
               return (
                 <tr key={sport} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
-                  {/* Sport */}
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${SPORT_DOTS[sport]}`} />
                       <span className="font-display text-xs text-white capitalize">{sport}</span>
                     </div>
                   </td>
-
-                  {/* Status badge */}
                   <td className="px-4 py-3">
-                    <span className={`font-display text-xs px-2 py-0.5 rounded-sm border ${
+                    <span className={`font-display text-xs px-2 py-0.5 rounded-sm ${
                       trained
-                        ? 'text-brand-greenlight bg-brand-greendark border-brand-green'
-                        : 'text-yellow-400 bg-yellow-900/20 border-yellow-800'
+                        ? 'text-brand-greenlight bg-brand-greendark'
+                        : 'text-yellow-400 bg-yellow-900/20'
                     }`}>
-                      {trained ? 'ML ACTIVE' : 'PRIOR MODE'}
+                      {trained ? 'ML ACTIVE' : 'PRIOR'}
                     </span>
                   </td>
-
-                  {/* ML weight bar */}
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 min-w-[100px]">
-                      <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
+                    <span className={`font-display text-xs tabular-nums ${
+                      samples >= 100 ? 'text-brand-greenlight'
+                      : samples >= 30  ? 'text-yellow-400'
+                      : 'text-gray-600'
+                    }`}>
+                      {samples.toLocaleString()}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
                         <div
-                          className={`h-full rounded-full ${barColor}`}
-                          style={{ width: wPct > 0 ? `${wPct}%` : '0%' }}
+                          className={`h-full rounded-full ${
+                            weight >= 0.6 ? 'bg-brand-green'
+                            : weight >= 0.3 ? 'bg-yellow-500'
+                            : 'bg-brand-midgray'
+                          }`}
+                          style={{ width: `${Math.min(weight * 100, 100)}%` }}
                         />
                       </div>
-                      <span className={`font-display text-xs tabular-nums w-8 ${wColor}`}>
-                        {wPct}%
+                      <span className="font-display text-xs text-gray-500 tabular-nums w-8">
+                        {Math.round(weight * 100)}%
                       </span>
                     </div>
                   </td>
-
-                  {/* Training samples */}
                   <td className="px-4 py-3">
                     <span className={`font-display text-xs tabular-nums ${
-                      n >= 100 ? 'text-brand-greenlight' : n >= 30 ? 'text-yellow-400' : 'text-gray-400'
+                      accuracy == null ? 'text-gray-600'
+                      : accuracy > 0.6  ? 'text-brand-greenlight'
+                      : accuracy > 0.5  ? 'text-yellow-400'
+                      : 'text-brand-redlight'
                     }`}>
-                      {n.toLocaleString()}
+                      {pctFmt(accuracy)}
                     </span>
                   </td>
-
-                  {/* Calibration — shows method name or "prior" with clear colour */}
                   <td className="px-4 py-3">
-                    <span className={`font-display text-xs uppercase ${calColor}`}>
-                      {calLabel}
+                    <span className={`font-display text-xs tabular-nums ${
+                      brier == null  ? 'text-gray-600'
+                      : brier < 0.20  ? 'text-brand-greenlight'
+                      : brier < 0.25  ? 'text-yellow-400'
+                      : 'text-brand-redlight'
+                    }`}>
+                      {fmt(brier)}
                     </span>
                   </td>
-
-                  {/* Progress bar toward next threshold */}
-                  <td className="px-4 py-3 min-w-[180px]">
-                    {nextThreshold ? (
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <div className="flex-1 h-1.5 bg-brand-darkgray rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all duration-700 ${progressColor}`}
-                              style={{ width: `${Math.min(progressPct, 100)}%` }}
-                            />
-                          </div>
-                          <span className="font-display text-xs text-gray-600 tabular-nums w-8 text-right">
-                            {progressPct}%
-                          </span>
-                        </div>
-                        <span className="font-display text-xs text-gray-600">{progressLabel}</span>
-                      </div>
-                    ) : (
-                      <span className="font-display text-xs text-brand-greenlight">Max calibration</span>
-                    )}
+                  <td className="px-4 py-3">
+                    <span className="font-display text-xs text-gray-500 tabular-nums">
+                      {fmt(logLoss)}
+                    </span>
                   </td>
                 </tr>
               )
@@ -266,189 +271,219 @@ function SportModelTable({ summary }) {
   )
 }
 
+// ── Metrics history table ─────────────────────────────────────────────────────
+function MetricsHistoryTable({ history }) {
+  if (!history.length) {
+    return (
+      <div className="card p-6 text-center">
+        <p className="font-display text-gray-600 text-sm">NO METRICS HISTORY YET</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card overflow-hidden">
+      <div className="px-4 py-3 border-b border-brand-midgray">
+        <p className="label">METRICS HISTORY</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="border-b border-brand-midgray bg-brand-darkgray">
+            <tr>
+              {['DATE', 'BRIER', 'LOG LOSS', 'ACCURACY', 'PREDICTIONS', 'RESOLVED'].map(h => (
+                <th key={h} className="text-left label px-4 py-3">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {[...history].reverse().slice(0, 30).map((row, i) => (
+              <tr key={i} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
+                <td className="px-4 py-3 font-display text-xs text-gray-500">
+                  {row.date ? new Date(row.date).toLocaleDateString() : '—'}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`font-display text-xs tabular-nums ${
+                    row.brier_score == null ? 'text-gray-600'
+                    : row.brier_score < 0.20 ? 'text-brand-greenlight'
+                    : row.brier_score < 0.25 ? 'text-yellow-400'
+                    : 'text-brand-redlight'
+                  }`}>
+                    {fmt(row.brier_score)}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
+                  {fmt(row.log_loss)}
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`font-display text-xs tabular-nums ${
+                    row.accuracy == null ? 'text-gray-600'
+                    : row.accuracy > 0.6  ? 'text-brand-greenlight'
+                    : row.accuracy > 0.5  ? 'text-yellow-400'
+                    : 'text-brand-redlight'
+                  }`}>
+                    {pctFmt(row.accuracy)}
+                  </span>
+                </td>
+                <td className="px-4 py-3 font-display text-xs text-gray-500 tabular-nums">
+                  {row.total_predictions ?? '—'}
+                </td>
+                <td className="px-4 py-3 font-display text-xs text-gray-500 tabular-nums">
+                  {row.resolved_count ?? '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MetricsPage() {
-  const { data: summary, loading: summaryLoading, refetch } = useMetricsSummary()
-  const { data: history } = useMetricsHistory(60)
-  const { data: predictions } = usePredictions(null, 200)
-  const { data: results } = useResults(200)
-  const { data: quota, loading: quotaLoading } = useQuota()
-  const [triggering, setTriggering] = useState(false)
-  const [trigMsg, setTrigMsg] = useState(null)
+  const { data: summary, loading: summaryLoading } = useMetricsSummary()
+  const { data: history, loading: historyLoading } = useMetricsHistory(30)
+  const { data: quota,   loading: quotaLoading }   = useQuota()
 
-  const handleTriggerLearning = async () => {
-    setTriggering(true)
-    setTrigMsg(null)
-    try {
-      await triggerLearning()
-      setTrigMsg({ type: 'success', text: 'Learning update triggered — model will retrain with latest resolved predictions.' })
-      refetch()
-    } catch (e) {
-      setTrigMsg({ type: 'error', text: e.response?.data?.detail || 'Failed to trigger learning' })
-    } finally {
-      setTriggering(false)
-    }
-  }
+  const perf = summary?.performance_metrics ?? {}
 
   return (
     <div className="animate-fade-in space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-display text-xl text-white tracking-wide">MODEL METRICS</h1>
-          <p className="font-body text-xs text-gray-600 mt-1">
-            Brier Score · Log Loss · Calibration · Accuracy · SerpAPI Quota · ML Ensemble Weights
-          </p>
-        </div>
-        <button
-          onClick={handleTriggerLearning}
-          disabled={triggering}
-          className="btn-ghost"
-        >
-          {triggering ? (
-            <span className="flex items-center gap-2">
-              <span className="w-3 h-3 border border-gray-400 border-t-transparent rounded-full animate-spin" />
-              UPDATING...
-            </span>
-          ) : 'TRIGGER LEARNING'}
-        </button>
+      <div>
+        <h1 className="font-display text-xl text-white tracking-wide">MODEL METRICS</h1>
+        <p className="font-body text-xs text-gray-600 mt-1">
+          Calibration quality, prediction accuracy, and search budget
+        </p>
       </div>
 
-      {trigMsg && (
-        <div className={`font-display text-xs px-4 py-3 rounded-sm border ${
-          trigMsg.type === 'success'
-            ? 'text-brand-greenlight bg-brand-greendark border-brand-green'
-            : 'text-brand-redlight bg-brand-reddark border-brand-red'
-        }`}>
-          {trigMsg.text}
-        </div>
+      {/* Top summary stats */}
+      <section>
+        <p className="label mb-3">OVERALL PERFORMANCE</p>
+        {summaryLoading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="card p-4 animate-pulse">
+                <div className="h-2 bg-brand-midgray rounded w-20 mb-3" />
+                <div className="h-7 bg-brand-midgray rounded w-24" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <StatBlock
+              label="BRIER SCORE"
+              value={fmt(perf.brier_score)}
+              sub="lower = better (0–1)"
+              color={
+                perf.brier_score == null ? 'text-gray-600'
+                : perf.brier_score < 0.20 ? 'text-brand-greenlight'
+                : perf.brier_score < 0.25 ? 'text-yellow-400'
+                : 'text-brand-redlight'
+              }
+            />
+            <StatBlock
+              label="LOG LOSS"
+              value={fmt(perf.log_loss)}
+              sub="lower = better"
+              color="text-white"
+            />
+            <StatBlock
+              label="ACCURACY"
+              value={pctFmt(perf.accuracy)}
+              sub="resolved predictions"
+              color={
+                perf.accuracy == null ? 'text-gray-600'
+                : perf.accuracy > 0.6  ? 'text-brand-greenlight'
+                : perf.accuracy > 0.5  ? 'text-yellow-400'
+                : 'text-brand-redlight'
+              }
+            />
+            <StatBlock
+              label="CALIBRATION"
+              value={fmt(perf.calibration_error)}
+              sub="expected calibration error"
+              color={
+                perf.calibration_error == null ? 'text-gray-600'
+                : perf.calibration_error < 0.05 ? 'text-brand-greenlight'
+                : perf.calibration_error < 0.10 ? 'text-yellow-400'
+                : 'text-brand-redlight'
+              }
+            />
+          </div>
+        )}
+      </section>
+
+      {/* Second row stats */}
+      {!summaryLoading && (
+        <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <StatBlock
+            label="TOTAL PREDICTIONS"
+            value={(summary?.total_predictions ?? 0).toLocaleString()}
+            sub="all time"
+          />
+          <StatBlock
+            label="RESOLVED"
+            value={(summary?.total_resolved ?? 0).toLocaleString()}
+            sub="results submitted"
+          />
+          <StatBlock
+            label="MODEL VERSION"
+            value={`v${summary?.model_version ?? '3.0.0'}`}
+            sub="current engine"
+          />
+          <StatBlock
+            label="ENGINE MODE"
+            value={Object.values(summary?.is_trained ?? {}).some(Boolean) ? 'ML ACTIVE' : 'PRIOR MODE'}
+            sub="training status"
+            color={Object.values(summary?.is_trained ?? {}).some(Boolean) ? 'text-brand-greenlight' : 'text-yellow-400'}
+          />
+        </section>
       )}
-
-      {/* Current performance */}
-      <section>
-        <p className="label mb-3">CURRENT PERFORMANCE</p>
-        <ModelStatsPanel summary={summary} loading={summaryLoading} />
-      </section>
-
-      {/* Quota + per-sport breakdown */}
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <QuotaPanel quota={quota} loading={quotaLoading} />
-        <div className="card p-5">
-          <p className="label mb-3">MODEL ENGINE INFO</p>
-          {summary ? (
-            <div className="space-y-2">
-              <div className="flex justify-between items-center py-2 border-b border-brand-midgray">
-                <span className="font-display text-xs text-gray-500">MODEL VERSION</span>
-                <span className="font-display text-xs text-white">v{summary.model_version || '3.0.0'}</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-brand-midgray">
-                <span className="font-display text-xs text-gray-500">ALGORITHM</span>
-                <span className="font-display text-xs text-gray-300">HistGradientBoosting</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-brand-midgray">
-                <span className="font-display text-xs text-gray-500">ENSEMBLE STRATEGY</span>
-                <span className="font-display text-xs text-gray-300">ML × weight + Prior × (1−weight)</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-brand-midgray">
-                <span className="font-display text-xs text-gray-500">CI METHOD</span>
-                <span className="font-display text-xs text-gray-300">Beta distribution (analytical)</span>
-              </div>
-              <div className="flex justify-between items-center py-2 border-b border-brand-midgray">
-                <span className="font-display text-xs text-gray-500">RECENCY WEIGHTING</span>
-                <span className="font-display text-xs text-gray-300">≤30d: 2× · ≤90d: 1.5× · older: 1×</span>
-              </div>
-              <div className="flex justify-between items-center py-2">
-                <span className="font-display text-xs text-gray-500">FEATURES</span>
-                <span className="font-display text-xs text-gray-300">17–23 per sport</span>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-6 bg-brand-midgray rounded animate-pulse" />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Per-sport breakdown table */}
-      <section>
-        <p className="label mb-3">PER-SPORT STATUS</p>
-        <SportModelTable summary={summary} />
-      </section>
 
       {/* Charts */}
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <PerformanceChart metricsHistory={history} />
-        <CalibrationChart predictions={predictions} resolvedPredictions={results} />
+        <CalibrationChart predictions={[]} resolvedPredictions={[]} />
       </section>
 
-      {/* Metrics history */}
+      {/* Per-sport model table */}
+      <section>
+        {summaryLoading ? (
+          <div className="card p-6 animate-pulse">
+            <div className="h-2 bg-brand-midgray rounded w-32 mb-4" />
+            <div className="flex flex-col gap-3">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-8 bg-brand-midgray rounded" />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <SportModelTable summary={summary} />
+        )}
+      </section>
+
+      {/* Search quota */}
+      <section>
+        <p className="label mb-3">SEARCH BUDGET</p>
+        <QuotaPanel quota={quota} loading={quotaLoading} />
+      </section>
+
+      {/* Metrics history table */}
       <section>
         <p className="label mb-3">METRICS HISTORY</p>
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="border-b border-brand-midgray bg-brand-darkgray">
-                <tr>
-                  {['DATE', 'VERSION', 'BRIER', 'LOG LOSS', 'CALIB ERR', 'ACCURACY', 'ML WEIGHT', 'SAMPLES'].map(col => (
-                    <th key={col} className="text-left label px-4 py-3">{col}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {!history.length ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-8 text-center font-display text-gray-600 text-xs">
-                      NO METRICS RECORDED YET — SUBMIT ACTUAL RESULTS TO BEGIN EVALUATION
-                    </td>
-                  </tr>
-                ) : history.map((m, i) => {
-                  const bColor = m.brier_score < 0.2 ? 'text-brand-greenlight' : m.brier_score < 0.25 ? 'text-yellow-500' : 'text-brand-redlight'
-                  const aColor = m.accuracy > 0.6 ? 'text-brand-greenlight' : m.accuracy > 0.5 ? 'text-yellow-500' : 'text-brand-redlight'
-                  const mlW    = m.retrain_result?.ml_weight ?? m.ml_weight
-                  const mlWPct = mlW != null ? `${Math.round(mlW * 100)}%` : '—'
-                  const mColor = mlW != null && mlW > 0.5 ? 'text-brand-greenlight' : mlW != null && mlW > 0.2 ? 'text-yellow-400' : 'text-gray-600'
-                  return (
-                    <tr key={i} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
-                      <td className="px-4 py-3 font-display text-xs text-gray-500 whitespace-nowrap">
-                        {new Date(m.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400">
-                        v{m.model_version}
-                        {m.sport && (
-                          <span className={`ml-2 w-1.5 h-1.5 inline-block rounded-full ${SPORT_DOTS[m.sport] || 'bg-gray-500'}`} />
-                        )}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${bColor}`}>
-                        {m.brier_score?.toFixed(4) ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
-                        {m.log_loss?.toFixed(4) ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
-                        {m.calibration_error ? `${(m.calibration_error * 100).toFixed(2)}%` : '—'}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${aColor}`}>
-                        {m.accuracy ? `${(m.accuracy * 100).toFixed(1)}%` : '—'}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${mColor}`}>
-                        {mlWPct}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-600 tabular-nums">
-                        {m.n_training_samples ?? m.total_predictions ?? '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+        {historyLoading ? (
+          <div className="card p-6 animate-pulse">
+            <div className="h-2 bg-brand-midgray rounded w-32 mb-4" />
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="h-8 bg-brand-midgray rounded mb-2" />
+            ))}
           </div>
-        </div>
+        ) : (
+          <MetricsHistoryTable history={history} />
+        )}
       </section>
-
     </div>
   )
 }

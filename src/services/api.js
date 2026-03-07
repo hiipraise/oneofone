@@ -15,7 +15,7 @@ api.interceptors.response.use(
   }
 )
 
-// ── Predictions ───────────────────────────────────────────────────────────────
+// ── Predictions ──────────────────────────────────────────────────────────────
 export const generatePrediction = (data) => api.post('/predictions/', data)
 
 export const getPredictions = (sport, limit = 50, includeDeleted = false) =>
@@ -37,21 +37,21 @@ export const triggerLearning = () => api.post('/predictions/learn/trigger')
 export const deletePrediction = (matchId) => api.delete(`/predictions/${matchId}`)
 export const restorePrediction = (matchId) => api.post(`/predictions/${matchId}/restore`)
 
-// ── Metrics ───────────────────────────────────────────────────────────────────
+// ── Metrics ──────────────────────────────────────────────────────────────────
 export const getMetrics = (limit = 30) => api.get('/metrics/', { params: { limit } })
 export const getLatestMetrics = () => api.get('/metrics/latest')
 export const getMetricsSummary = () => api.get('/metrics/summary')
 export const getQuota = () => api.get('/metrics/quota')
 
-// ── Results ───────────────────────────────────────────────────────────────────
+// ── Results ──────────────────────────────────────────────────────────────────
 export const getResults = (limit = 50) => api.get('/results/', { params: { limit } })
 
-// ── Search ────────────────────────────────────────────────────────────────────
+// ── Search ───────────────────────────────────────────────────────────────────
 export const webSearch = (q) => api.get('/search/', { params: { q } })
 export const getTeamInfo = (team, sport) =>
   api.get('/search/team', { params: { team, sport } })
 
-// ── Chat ──────────────────────────────────────────────────────────────────────
+// ── Chat ─────────────────────────────────────────────────────────────────────
 export const sendChat = (data) => api.post('/chat/', data)
 
 export const getSessionHistory = (sessionId, limit = 50) =>
@@ -68,7 +68,14 @@ export const deleteSession = (sessionId) =>
 export const restoreSession = (sessionId) =>
   api.post(`/chat/session/${sessionId}/restore`)
 
-// ── Health ────────────────────────────────────────────────────────────────────
+// ── Scheduler ────────────────────────────────────────────────────────────────
+export const getSchedulerStatus   = () => api.get('/scheduler/status')
+export const triggerScheduler     = () => api.post('/scheduler/trigger')
+export const getSchedulerLogs     = (limit = 50) =>
+  api.get('/scheduler/logs', { params: { limit } })
+export const getTodayFixtures     = () => api.get('/scheduler/fixtures/today')
+
+// ── Health ───────────────────────────────────────────────────────────────────
 export const healthCheck = () => axios.get(`${window.location.origin}/health`)
 
 export default api

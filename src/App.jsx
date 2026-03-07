@@ -8,17 +8,19 @@ import HistoryPage from './pages/HistoryPage'
 import MetricsPage from './pages/MetricsPage'
 import ChatPage from './pages/ChatPage'
 import ChatHistoryPage from './pages/ChatHistoryPage'
+import SchedulerPage from './pages/SchedulerPage'
 
 export default function App() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/predict" element={<PredictPage />} />
-        <Route path="/history" element={<HistoryPage />} />
-        <Route path="/metrics" element={<MetricsPage />} />
-        <Route path="/chat" element={<ChatPage />} />
+        <Route path="/"          element={<Dashboard />} />
+        <Route path="/predict"   element={<PredictPage />} />
+        <Route path="/history"   element={<HistoryPage />} />
+        <Route path="/metrics"   element={<MetricsPage />} />
+        <Route path="/chat"      element={<ChatPage />} />
         <Route path="/chat/history" element={<ChatHistoryPage />} />
+        <Route path="/scheduler" element={<SchedulerPage />} />
       </Routes>
     </Layout>
   )
