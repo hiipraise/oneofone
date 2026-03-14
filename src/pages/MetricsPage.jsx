@@ -1,12 +1,16 @@
 // src/pages/MetricsPage.jsx
-import React, { useState, useEffect } from 'react'
-import { useMetricsSummary, useMetricsHistory, usePredictions, useResults, useQuota } from '../hooks/useData'
-import ModelStatsPanel from '../components/ModelStatsPanel'
-import PerformanceChart from '../charts/PerformanceChart'
-import CalibrationChart from '../charts/CalibrationChart'
-import PaginationControls from '../components/PaginationControls'
-import { triggerLearning } from '../services/api'
-import ConfidenceHistoryChart from '../charts/ConfidenceHistoryChart'
+import React, { useState, useEffect } from "react";
+import {
+  useMetricsSummary,
+  useMetricsHistory,
+  usePredictions,
+  useResults,
+  useQuota,
+} from "../hooks/useData";
+import ModelStatsPanel from "../components/ModelStatsPanel";
+import PaginationControls from "../components/PaginationControls";
+import { triggerLearning } from "../services/api";
+import ConfidenceHistoryChart from "../charts/ConfidenceHistoryChart";
 
 const SPORT_DOTS = {
   soccer: "bg-brand-green",
@@ -355,23 +359,33 @@ function SportModelTable({ summary }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function MetricsPage() {
-  const { data: summary, loading: summaryLoading, refetch } = useMetricsSummary()
-  const { data: history } = useMetricsHistory(60)
-  const { data: predictions } = usePredictions(null, 200)
-  const { data: results } = useResults(200)
-  const { data: quota, loading: quotaLoading } = useQuota()
-  const [triggering, setTriggering] = useState(false)
-  const [trigMsg, setTrigMsg] = useState(null)
-  const HISTORY_PAGE_SIZE = 12
-  const [historyPage, setHistoryPage] = useState(1)
+  const {
+    data: summary,
+    loading: summaryLoading,
+    refetch,
+  } = useMetricsSummary();
+  const { data: history } = useMetricsHistory(60);
+  const { data: predictions } = usePredictions(null, 200);
+  const { data: results } = useResults(200);
+  const { data: quota, loading: quotaLoading } = useQuota();
+  const [triggering, setTriggering] = useState(false);
+  const [trigMsg, setTrigMsg] = useState(null);
+  const HISTORY_PAGE_SIZE = 12;
+  const [historyPage, setHistoryPage] = useState(1);
 
   useEffect(() => {
-    setHistoryPage(1)
-  }, [history.length])
+    setHistoryPage(1);
+  }, [history.length]);
 
-  const historyTotalPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE))
-  const safeHistoryPage = Math.min(historyPage, historyTotalPages)
-  const paginatedHistory = history.slice((safeHistoryPage - 1) * HISTORY_PAGE_SIZE, safeHistoryPage * HISTORY_PAGE_SIZE)
+  const historyTotalPages = Math.max(
+    1,
+    Math.ceil(history.length / HISTORY_PAGE_SIZE),
+  );
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages);
+  const paginatedHistory = history.slice(
+    (safeHistoryPage - 1) * HISTORY_PAGE_SIZE,
+    safeHistoryPage * HISTORY_PAGE_SIZE,
+  );
 
   const handleTriggerLearning = async () => {
     setTriggering(true);
@@ -516,12 +530,8 @@ export default function MetricsPage() {
       </section>
 
       {/* Charts */}
-      <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <PerformanceChart metricsHistory={history} />
-        <CalibrationChart
-          predictions={predictions}
-          resolvedPredictions={results}
-        />
+      <section>
+        <ConfidenceHistoryChart />
       </section>
 
       {/* Metrics history */}
@@ -559,44 +569,77 @@ export default function MetricsPage() {
                       EVALUATION
                     </td>
                   </tr>
-                ) : paginatedHistory.map((m, i) => {
-                  const bColor = m.brier_score < 0.2 ? 'text-brand-greenlight' : m.brier_score < 0.25 ? 'text-yellow-500' : 'text-brand-redlight'
-                  const aColor = m.accuracy > 0.6 ? 'text-brand-greenlight' : m.accuracy > 0.5 ? 'text-yellow-500' : 'text-brand-redlight'
-                  const mlW    = m.retrain_result?.ml_weight ?? m.ml_weight
-                  const mlWPct = mlW != null ? `${Math.round(mlW * 100)}%` : '—'
-                  const mColor = mlW != null && mlW > 0.5 ? 'text-brand-greenlight' : mlW != null && mlW > 0.2 ? 'text-yellow-400' : 'text-gray-600'
-                  return (
-                    <tr key={`${m.date}-${m.model_version}-${i}`} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
-                      <td className="px-4 py-3 font-display text-xs text-gray-500 whitespace-nowrap">
-                        {new Date(m.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400">
-                        v{m.model_version}
-                        {m.sport && (
-                          <span className={`ml-2 w-1.5 h-1.5 inline-block rounded-full ${SPORT_DOTS[m.sport] || 'bg-gray-500'}`} />
-                        )}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${bColor}`}>
-                        {m.brier_score?.toFixed(4) ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
-                        {m.log_loss?.toFixed(4) ?? '—'}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
-                        {m.calibration_error ? `${(m.calibration_error * 100).toFixed(2)}%` : '—'}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${aColor}`}>
-                        {m.accuracy ? `${(m.accuracy * 100).toFixed(1)}%` : '—'}
-                      </td>
-                      <td className={`px-4 py-3 font-display text-xs tabular-nums ${mColor}`}>
-                        {mlWPct}
-                      </td>
-                      <td className="px-4 py-3 font-display text-xs text-gray-600 tabular-nums">
-                        {m.n_training_samples ?? m.total_predictions ?? '—'}
-                      </td>
-                    </tr>
-                  )
-                })}
+                ) : (
+                  paginatedHistory.map((m, i) => {
+                    const bColor =
+                      m.brier_score < 0.2
+                        ? "text-brand-greenlight"
+                        : m.brier_score < 0.25
+                          ? "text-yellow-500"
+                          : "text-brand-redlight";
+                    const aColor =
+                      m.accuracy > 0.6
+                        ? "text-brand-greenlight"
+                        : m.accuracy > 0.5
+                          ? "text-yellow-500"
+                          : "text-brand-redlight";
+                    const mlW = m.retrain_result?.ml_weight ?? m.ml_weight;
+                    const mlWPct =
+                      mlW != null ? `${Math.round(mlW * 100)}%` : "—";
+                    const mColor =
+                      mlW != null && mlW > 0.5
+                        ? "text-brand-greenlight"
+                        : mlW != null && mlW > 0.2
+                          ? "text-yellow-400"
+                          : "text-gray-600";
+                    return (
+                      <tr
+                        key={`${m.date}-${m.model_version}-${i}`}
+                        className="border-b border-brand-midgray hover:bg-brand-gray transition-colors"
+                      >
+                        <td className="px-4 py-3 font-display text-xs text-gray-500 whitespace-nowrap">
+                          {new Date(m.date).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-3 font-display text-xs text-gray-400">
+                          v{m.model_version}
+                          {m.sport && (
+                            <span
+                              className={`ml-2 w-1.5 h-1.5 inline-block rounded-full ${SPORT_DOTS[m.sport] || "bg-gray-500"}`}
+                            />
+                          )}
+                        </td>
+                        <td
+                          className={`px-4 py-3 font-display text-xs tabular-nums ${bColor}`}
+                        >
+                          {m.brier_score?.toFixed(4) ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
+                          {m.log_loss?.toFixed(4) ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 font-display text-xs text-gray-400 tabular-nums">
+                          {m.calibration_error
+                            ? `${(m.calibration_error * 100).toFixed(2)}%`
+                            : "—"}
+                        </td>
+                        <td
+                          className={`px-4 py-3 font-display text-xs tabular-nums ${aColor}`}
+                        >
+                          {m.accuracy
+                            ? `${(m.accuracy * 100).toFixed(1)}%`
+                            : "—"}
+                        </td>
+                        <td
+                          className={`px-4 py-3 font-display text-xs tabular-nums ${mColor}`}
+                        >
+                          {mlWPct}
+                        </td>
+                        <td className="px-4 py-3 font-display text-xs text-gray-600 tabular-nums">
+                          {m.n_training_samples ?? m.total_predictions ?? "—"}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
