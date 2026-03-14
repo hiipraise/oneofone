@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react'
 import { generatePrediction, validateMatch, getLiveLeagues } from '../services/api'
 import PredictionCard from '../components/PredictionCard'
 import ExtendedMarketsPanel from '../components/ExtendedMarketsPanel'
-
-const SPORTS = ['soccer', 'basketball', 'tennis']
+import { useApiContract } from '../hooks/useApiContract'
+import { SPORT_LABELS } from '../config/apiContract'
 
 const PIPELINE_STEPS = {
   soccer: [
@@ -41,9 +41,13 @@ const PIPELINE_STEPS = {
 }
 
 export default function PredictPage() {
+  const { contract } = useApiContract()
+  const sports = contract.supported_sports
+  const teamNameMin = contract.field_limits.team_name.min
+
   const [form, setForm] = useState({
     home_team: '', away_team: '',
-    sport: 'soccer', league: '', match_date: '',
+    sport: sports[0] || 'soccer', league: '', match_date: '',
     skip_validation: false,
   })
   const [leagues, setLeagues]         = useState([])
@@ -53,6 +57,12 @@ export default function PredictPage() {
   const [loading, setLoading]         = useState(false)
   const [result, setResult]           = useState(null)
   const [error, setError]             = useState(null)
+
+  useEffect(() => {
+    if (!sports.includes(form.sport)) {
+      setForm((prev) => ({ ...prev, sport: sports[0] || 'soccer' }))
+    }
+  }, [sports, form.sport])
 
   useEffect(() => {
     setLeagues([])
@@ -67,7 +77,7 @@ export default function PredictPage() {
 
   useEffect(() => {
     const t = setTimeout(() => {
-      if (form.home_team.trim().length >= 3 && form.away_team.trim().length >= 3) {
+      if (form.home_team.trim().length >= teamNameMin && form.away_team.trim().length >= teamNameMin) {
         setValidating(true)
         validateMatch(form.home_team, form.away_team, form.sport, form.match_date || undefined)
           .then(res => setValidation(res.data))
@@ -78,7 +88,7 @@ export default function PredictPage() {
       }
     }, 800)
     return () => clearTimeout(t)
-  }, [form.home_team, form.away_team, form.sport, form.match_date])
+  }, [form.home_team, form.away_team, form.sport, form.match_date, teamNameMin])
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target
@@ -148,9 +158,9 @@ export default function PredictPage() {
                 name="sport" value={form.sport} onChange={handleChange} disabled={loading}
                 className="w-full bg-brand-gray border border-brand-midgray focus:border-brand-red outline-none text-white font-body text-sm px-4 py-2.5 rounded-sm transition-colors disabled:opacity-50"
               >
-                {SPORTS.map(s => (
+                {sports.map(s => (
                   <option key={s} value={s}>
-                    {s === 'soccer' ? 'Football / Soccer' : s.charAt(0).toUpperCase() + s.slice(1)}
+                    {SPORT_LABELS[s] || (s.charAt(0).toUpperCase() + s.slice(1))}
                   </option>
                 ))}
               </select>
@@ -187,7 +197,7 @@ export default function PredictPage() {
           </div>
 
           {/* Validation indicator */}
-          {form.home_team.length >= 3 && form.away_team.length >= 3 && (
+          {form.home_team.length >= teamNameMin && form.away_team.length >= teamNameMin && (
             <div>
               {validating ? (
                 <div className="flex items-center gap-2 text-gray-500">

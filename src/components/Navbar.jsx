@@ -16,11 +16,15 @@ const NAV_LINKS = [
 export default function Navbar({ toggleSidebar }) {
   const location = useLocation()
   const [systemOnline, setSystemOnline] = useState(null)
+  const [healthMeta, setHealthMeta] = useState(null)
   const { data: quota } = useQuota()
 
   useEffect(() => {
     healthCheck()
-      .then(() => setSystemOnline(true))
+      .then((res) => {
+        setSystemOnline(true)
+        setHealthMeta(res.data ?? null)
+      })
       .catch(() => setSystemOnline(false))
   }, [])
 
@@ -106,6 +110,14 @@ export default function Navbar({ toggleSidebar }) {
             <span className="font-display text-xs text-gray-500 hidden sm:block">
               {systemOnline === null ? 'CONNECTING' : systemOnline ? 'ONLINE' : 'OFFLINE'}
             </span>
+            {healthMeta && (
+              <span
+                className="font-display text-[10px] text-gray-700 hidden lg:block"
+                title={`DB: ${healthMeta?.services?.database || 'unknown'} · Scheduler: ${healthMeta?.services?.scheduler || 'unknown'} · Uptime: ${Math.round(healthMeta?.uptime_seconds || 0)}s`}
+              >
+                {healthMeta?.services?.database || 'unknown'} / {healthMeta?.services?.scheduler || 'unknown'}
+              </span>
+            )}
           </div>
         </div>
       </div>

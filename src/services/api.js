@@ -1,5 +1,6 @@
 // src/services/api.js
 import axios from 'axios'
+import { DEFAULT_API_CONTRACT } from '../config/apiContract'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
@@ -18,7 +19,11 @@ api.interceptors.response.use(
 // ── Predictions ──────────────────────────────────────────────────────────────
 export const generatePrediction = (data) => api.post('/predictions/', data)
 
-export const getPredictions = (sport, limit = 50, includeDeleted = false) =>
+export const getPredictions = (
+  sport,
+  limit = DEFAULT_API_CONTRACT.field_limits.predictions_page_limit.default,
+  includeDeleted = false
+) =>
   api.get('/predictions/', { params: { sport, limit, include_deleted: includeDeleted } })
 
 export const getPredictionById = (matchId) => api.get(`/predictions/${matchId}`)
@@ -50,6 +55,9 @@ export const getResults = (limit = 50) => api.get('/results/', { params: { limit
 export const webSearch = (q) => api.get('/search/', { params: { q } })
 export const getTeamInfo = (team, sport) =>
   api.get('/search/team', { params: { team, sport } })
+
+// ── API contract ─────────────────────────────────────────────────────────────
+export const getFrontendContract = () => api.get('/meta/frontend')
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 export const sendChat = (data) => api.post('/chat/', data)
