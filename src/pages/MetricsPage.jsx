@@ -1,9 +1,10 @@
 // src/pages/MetricsPage.jsx
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useMetricsSummary, useMetricsHistory, usePredictions, useResults, useQuota } from '../hooks/useData'
 import ModelStatsPanel from '../components/ModelStatsPanel'
 import PerformanceChart from '../charts/PerformanceChart'
 import CalibrationChart from '../charts/CalibrationChart'
+import PaginationControls from '../components/PaginationControls'
 import { triggerLearning } from '../services/api'
 
 const SPORT_DOTS = {
@@ -281,6 +282,16 @@ export default function MetricsPage() {
   const { data: quota, loading: quotaLoading } = useQuota()
   const [triggering, setTriggering] = useState(false)
   const [trigMsg, setTrigMsg] = useState(null)
+  const HISTORY_PAGE_SIZE = 12
+  const [historyPage, setHistoryPage] = useState(1)
+
+  useEffect(() => {
+    setHistoryPage(1)
+  }, [history.length])
+
+  const historyTotalPages = Math.max(1, Math.ceil(history.length / HISTORY_PAGE_SIZE))
+  const safeHistoryPage = Math.min(historyPage, historyTotalPages)
+  const paginatedHistory = history.slice((safeHistoryPage - 1) * HISTORY_PAGE_SIZE, safeHistoryPage * HISTORY_PAGE_SIZE)
 
   const handleTriggerLearning = async () => {
     setTriggering(true)
@@ -411,14 +422,14 @@ export default function MetricsPage() {
                       NO METRICS RECORDED YET — SUBMIT ACTUAL RESULTS TO BEGIN EVALUATION
                     </td>
                   </tr>
-                ) : history.map((m, i) => {
+                ) : paginatedHistory.map((m, i) => {
                   const bColor = m.brier_score < 0.2 ? 'text-brand-greenlight' : m.brier_score < 0.25 ? 'text-yellow-500' : 'text-brand-redlight'
                   const aColor = m.accuracy > 0.6 ? 'text-brand-greenlight' : m.accuracy > 0.5 ? 'text-yellow-500' : 'text-brand-redlight'
                   const mlW    = m.retrain_result?.ml_weight ?? m.ml_weight
                   const mlWPct = mlW != null ? `${Math.round(mlW * 100)}%` : '—'
                   const mColor = mlW != null && mlW > 0.5 ? 'text-brand-greenlight' : mlW != null && mlW > 0.2 ? 'text-yellow-400' : 'text-gray-600'
                   return (
-                    <tr key={i} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
+                    <tr key={`${m.date}-${m.model_version}-${i}`} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
                       <td className="px-4 py-3 font-display text-xs text-gray-500 whitespace-nowrap">
                         {new Date(m.date).toLocaleDateString()}
                       </td>
@@ -452,6 +463,13 @@ export default function MetricsPage() {
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={safeHistoryPage}
+            totalItems={history.length}
+            pageSize={HISTORY_PAGE_SIZE}
+            onPageChange={setHistoryPage}
+            itemLabel="METRIC SNAPSHOTS"
+          />
         </div>
       </section>
 
