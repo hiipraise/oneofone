@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../services/api'
+import PaginationControls from '../components/PaginationControls'
 
 const SPORTS = ['soccer', 'basketball', 'tennis']
 const SPORT_DOTS  = { soccer: 'bg-brand-green', basketball: 'bg-yellow-500', tennis: 'bg-blue-500' }
@@ -101,6 +102,16 @@ function StatusCard({ status, loading }) {
 // ── Today fixture table ───────────────────────────────────────────────────────
 function TodayTable({ fixtures, sport, loading }) {
   const rows = fixtures?.by_sport?.[sport] ?? []
+  const PAGE_SIZE = 8
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [sport, rows.length])
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const paginatedRows = rows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   if (loading) {
     return (
@@ -135,7 +146,7 @@ function TodayTable({ fixtures, sport, loading }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => {
+            {paginatedRows.map((row, i) => {
               const isHome = row.predicted_outcome === 'home_win'
               const isAway = row.predicted_outcome === 'away_win'
               return (
@@ -179,15 +190,29 @@ function TodayTable({ fixtures, sport, loading }) {
           </tbody>
         </table>
       </div>
-      <div className="px-4 py-2 border-t border-brand-midgray">
-        <span className="font-display text-xs text-gray-700">{rows.length} FIXTURES TODAY</span>
-      </div>
+      <PaginationControls
+        currentPage={safePage}
+        totalItems={rows.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+        itemLabel="FIXTURES TODAY"
+      />
     </div>
   )
 }
 
 // ── Schedule log ──────────────────────────────────────────────────────────────
 function SchedulerLogs({ logs, loading }) {
+  const PAGE_SIZE = 10
+  const [page, setPage] = useState(1)
+
+  useEffect(() => {
+    setPage(1)
+  }, [logs.length])
+
+  const totalPages = Math.max(1, Math.ceil(logs.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const paginatedLogs = logs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
   if (loading) {
     return (
       <div className="flex flex-col gap-1">
@@ -218,7 +243,7 @@ function SchedulerLogs({ logs, loading }) {
             </tr>
           </thead>
           <tbody>
-            {logs.map((log, i) => (
+            {paginatedLogs.map((log, i) => (
               <tr key={i} className="border-b border-brand-midgray hover:bg-brand-gray transition-colors">
                 <td className="px-4 py-3 font-display text-xs text-gray-500 whitespace-nowrap">
                   {formatTime(log.timestamp)}
@@ -241,6 +266,13 @@ function SchedulerLogs({ logs, loading }) {
           </tbody>
         </table>
       </div>
+      <PaginationControls
+        currentPage={safePage}
+        totalItems={logs.length}
+        pageSize={PAGE_SIZE}
+        onPageChange={setPage}
+        itemLabel="LOG ENTRIES"
+      />
     </div>
   )
 }
