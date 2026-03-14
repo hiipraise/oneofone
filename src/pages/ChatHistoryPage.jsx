@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getSessionHistory, deleteSession, restoreSession } from '../services/api'
+import PaginationControls from '../components/PaginationControls'
 
 async function fetchAllSessions(includeDeleted = false) {
   const { default: api } = await import('../services/api')
@@ -206,6 +207,8 @@ export default function ChatHistoryPage() {
   const [searchQuery, setSearchQuery]         = useState('')
   const [showDeleted, setShowDeleted]         = useState(false)
   const [showPreviewMobile, setShowPreviewMobile] = useState(false)
+  const PAGE_SIZE = 12
+  const [page, setPage] = useState(1)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -243,6 +246,10 @@ export default function ChatHistoryPage() {
 
   const handleAction = () => load()
 
+  useEffect(() => {
+    setPage(1)
+  }, [searchQuery, showDeleted])
+
   const filtered = sessions.filter(s => {
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
@@ -258,6 +265,10 @@ export default function ChatHistoryPage() {
   const totalMessages = sessions.filter(s => !s.deleted_at)
     .reduce((sum, s) => sum + (s.message_count || 0), 0)
   const deletedCount = sessions.filter(s => s.deleted_at).length
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const pagedSessions = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   return (
     <div className="animate-fade-in">
@@ -330,22 +341,31 @@ export default function ChatHistoryPage() {
 
           {/* Session list — full width on mobile, fixed 280px on desktop */}
           <div className={`
-            flex flex-col gap-2 overflow-y-auto
+            flex flex-col gap-2
             lg:w-72 lg:shrink-0
             ${showPreviewMobile && selectedId ? 'hidden lg:flex' : 'flex'}
-          `}
-            style={{ maxHeight: 'calc(100vh - 320px)' }}
-          >
-            {filtered.map(session => (
-              <SessionCard
-                key={session.session_id}
-                session={session}
-                onResume={(id) => navigate(`/chat?session=${id}`)}
-                onPreview={handlePreview}
-                active={selectedId === session.session_id}
-                onAction={handleAction}
+          `}>
+            <div className="flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: 'calc(100vh - 360px)' }}>
+              {pagedSessions.map(session => (
+                <SessionCard
+                  key={session.session_id}
+                  session={session}
+                  onResume={(id) => navigate(`/chat?session=${id}`)}
+                  onPreview={handlePreview}
+                  active={selectedId === session.session_id}
+                  onAction={handleAction}
+                />
+              ))}
+            </div>
+            <div className="card overflow-hidden">
+              <PaginationControls
+                currentPage={safePage}
+                totalItems={filtered.length}
+                pageSize={PAGE_SIZE}
+                onPageChange={setPage}
+                itemLabel="SESSIONS"
               />
-            ))}
+            </div>
           </div>
 
           {/* Preview panel — always visible on desktop, overlay on mobile when session selected */}
