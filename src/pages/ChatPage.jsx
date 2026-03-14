@@ -3,9 +3,9 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { sendChat, getSessionHistory, createSession, deleteSession } from '../services/api'
 import PredictionCard from '../components/PredictionCard'
+import { useApiContract } from '../hooks/useApiContract'
+import { SPORT_LABELS } from '../config/apiContract'
 
-const SPORTS = ['soccer', 'basketball', 'tennis']
-const SPORT_LABELS = { soccer: 'Football / Soccer', basketball: 'Basketball', tennis: 'Tennis' }
 const SESSION_KEY = 'oneofone_session_id'
 
 const PROMPT_SUGGESTIONS = {
@@ -202,6 +202,10 @@ function Suggestions({ sport, onPick }) {
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function ChatPage() {
+  const { contract } = useApiContract()
+  const sports = contract.supported_sports
+  const chatMessageMax = contract.field_limits.chat_message.max
+
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
 
@@ -387,7 +391,7 @@ export default function ChatPage() {
         <div>
           <h1 className="font-display text-xl text-white tracking-wide">AI PREDICTION CHAT</h1>
           <p className="font-body text-xs text-gray-600 mt-0.5">
-            Groq LLM · live web search · persistent memory · Football, Basketball, Tennis
+            Groq LLM · live web search · persistent memory · {sports.map((s) => SPORT_LABELS[s] || s).join(', ')}
           </p>
         </div>
 
@@ -398,8 +402,8 @@ export default function ChatPage() {
           className="bg-brand-gray border border-brand-midgray text-gray-400 font-display text-xs px-3 py-2 rounded-sm outline-none focus:border-brand-red transition-colors"
         >
           <option value="">All Sports</option>
-          {SPORTS.map(s => (
-            <option key={s} value={s}>{SPORT_LABELS[s]}</option>
+          {sports.map(s => (
+            <option key={s} value={s}>{SPORT_LABELS[s] || s}</option>
           ))}
         </select>
       </div>
@@ -447,6 +451,7 @@ export default function ChatPage() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          maxLength={chatMessageMax}
           placeholder={
             sport
               ? `Ask about ${SPORT_LABELS[sport]} — e.g. "${PROMPT_SUGGESTIONS[sport]?.[0] || 'Predict a match'}"`
@@ -469,7 +474,7 @@ export default function ChatPage() {
       {/* Character hint */}
       {input.length > 0 && (
         <p className="font-display text-xs text-gray-700 mt-1 text-right">
-          Enter to send · Shift+Enter for new line
+          {input.length}/{chatMessageMax} · Enter to send · Shift+Enter for new line
         </p>
       )}
     </div>
