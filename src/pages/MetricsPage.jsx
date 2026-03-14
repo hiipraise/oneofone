@@ -416,7 +416,7 @@ export default function MetricsPage() {
             MODEL METRICS
           </h1>
           <p className="font-body text-xs text-gray-600 mt-1">
-            Brier Score · Log Loss · Calibration · Accuracy · SerpAPI Quota · ML
+            Brier Score · Log Loss · Calibration · Accuracy · Serper Quota · ML
             Ensemble Weights
           </p>
         </div>
