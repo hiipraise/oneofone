@@ -54,6 +54,8 @@ export const getMetrics = (limit = 30) =>
 export const getLatestMetrics = () => api.get("/metrics/latest");
 export const getMetricsSummary = () => api.get("/metrics/summary");
 export const getQuota = () => api.get("/metrics/quota");
+export const getConfidenceHistory = (days = 30) =>
+  api.get("/metrics/confidence-history", { params: { days } });
 
 // ── Results ──────────────────────────────────────────────────────────────────
 export const getResults = (limit = 50) =>

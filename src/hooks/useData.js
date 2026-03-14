@@ -6,6 +6,7 @@ import {
   getMetrics,
   getResults,
   getQuota,
+  getConfidenceHistory,
 } from '../services/api'
 
 export function usePredictions(sport = null, limit = 50) {
@@ -65,6 +66,26 @@ export function useMetricsHistory(limit = 30) {
   }, [limit])
 
   return { data, loading }
+}
+
+export function useConfidenceHistory(days = 30) {
+  const [data, setData] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const fetch = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await getConfidenceHistory(days)
+      setData(Array.isArray(res.data) ? res.data : [])
+    } catch {
+      setData([])
+    } finally {
+      setLoading(false)
+    }
+  }, [days])
+
+  useEffect(() => { fetch() }, [fetch])
+  return { data, loading, refetch: fetch }
 }
 
 export function useResults(limit = 50) {
