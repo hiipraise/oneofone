@@ -80,24 +80,24 @@ function BasketballTab({ markets }) {
   )
   const ou = bm.points_over_under || {}
   const lines = Object.keys(ou)
-    .filter(k => k !== 'expected_total')
+    .filter(k => k !== 'expected_total' && k !== 'source')
     .sort((a, b) => parseInt(a.replace('line_', '')) - parseInt(b.replace('line_', '')))
 
   return (
     <div className="flex flex-col gap-5">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="bg-brand-darkgray border border-brand-midgray p-3 rounded-sm text-center">
-          <p className="label mb-1">EXPECTED TOTAL</p>
+          <p className="label mb-1">PROJECTED TOTAL</p>
           <p className="font-display text-xl text-white">{ou.expected_total ?? '-'}</p>
         </div>
         <div className="bg-brand-darkgray border border-brand-midgray p-3 rounded-sm text-center">
-          <p className="label mb-1">HOME PROJ</p>
+          <p className="label mb-1">HOME POINTS</p>
           <p className="font-display text-xl text-brand-greenlight">
             {bm.home_expected_pts ?? '-'}
           </p>
         </div>
         <div className="bg-brand-darkgray border border-brand-midgray p-3 rounded-sm text-center">
-          <p className="label mb-1">AWAY PROJ</p>
+          <p className="label mb-1">AWAY POINTS</p>
           <p className="font-display text-xl text-brand-redlight">
             {bm.away_expected_pts ?? '-'}
           </p>
@@ -106,9 +106,9 @@ function BasketballTab({ markets }) {
 
       {bm.expected_spread != null && (
         <div className="flex gap-3 items-center">
-          <span className="label">SPREAD</span>
+          <span className="label">PROJECTED SPREAD</span>
           <span className="font-display text-sm text-white">
-            Home {bm.expected_spread > 0 ? `−${bm.expected_spread}` : `+${Math.abs(bm.expected_spread)}`}
+            {bm.expected_spread > 0 ? `Home −${bm.expected_spread}` : bm.expected_spread < 0 ? `Away −${Math.abs(bm.expected_spread)}` : "Pick'em"}
           </span>
         </div>
       )}
@@ -118,7 +118,7 @@ function BasketballTab({ markets }) {
           data={ou}
           lines={lines}
           labelFn={k => `${k.replace('line_', '')} Pts`}
-          title="Points over/under"
+          title={bm.points_over_under?.source === 'adaptive_model' ? 'Totals estimated from win strength, form, pace, and market signals.' : 'Totals estimated from team scoring data plus form, pace, and market signals.'}
         />
       )}
 
@@ -149,12 +149,12 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
   // Build tab list based on what data is available and what sport we are
   const allTabs = [
     { key: 'goals',         label: 'GOALS O/U',     sports: ['soccer'],            show: !!markets?.goals_over_under },
-    { key: 'btts',          label: 'GG/NG',          sports: ['soccer'],            show: !!markets?.btts },
+    { key: 'btts',          label: 'BOTH TEAMS TO SCORE', sports: ['soccer'], show: !!markets?.btts },
     { key: 'correct_score', label: 'CORRECT SCORE',  sports: ['soccer'],            show: !!markets?.correct_score },
     { key: 'corners',       label: 'CORNERS',        sports: ['soccer'],            show: !!markets?.corners },
     { key: 'bookings',      label: 'BOOKINGS',       sports: ['soccer'],            show: !!markets?.bookings },
     { key: 'asian',         label: 'ASIAN HC',       sports: ['soccer'],            show: !!markets?.asian_handicap },
-    { key: 'basketball',    label: 'MARKETS',        sports: ['basketball'],        show: !!markets?.basketball },
+    { key: 'basketball',    label: 'GAME OUTLOOK',   sports: ['basketball'],        show: !!markets?.basketball },
   ]
 
   const tabs = allTabs.filter(t => t.show && t.sports.includes(sportL))

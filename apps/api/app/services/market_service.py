@@ -143,35 +143,64 @@ def _bookings(home_form: float, away_form: float, rivalry: float = 0.5) -> Dict[
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _basketball_markets(features: Dict[str, float], home_prob: float) -> Dict[str, Any]:
-    """
-    Points over/under and spread using de-normalised expected totals.
-    NBA typical range: 200–240 combined points.
-    """
-    # De-normalise pts (normalised into [0,1] from 80–130 range)
+    """Build basketball totals/spread markets without collapsing to defaults."""
     def _denorm(v: float) -> float:
         return 80.0 + v * 60.0
 
+    def _centered_signal(value: float, fallback: float = 0.5) -> float:
+        return float(features.get(value, fallback)) - 0.5
+
     home_pts = _denorm(features.get("home_pts_avg", 0.5))
     away_pts = _denorm(features.get("away_pts_avg", 0.5))
-    home_def = _denorm(1.0 - features.get("home_pts_allowed_avg", 0.5))
-    away_def = _denorm(1.0 - features.get("away_pts_allowed_avg", 0.5))
+    home_allowed = _denorm(1.0 - features.get("home_pts_allowed_avg", 0.5))
+    away_allowed = _denorm(1.0 - features.get("away_pts_allowed_avg", 0.5))
 
-    # Expected points: geometric mean of offence vs opponent defence
-    home_expected = (home_pts + away_def) / 2.0
-    away_expected = (away_pts + home_def) / 2.0
-    total_expected = home_expected + away_expected
+    raw_home = (home_pts + away_allowed) / 2.0
+    raw_away = (away_pts + home_allowed) / 2.0
 
-    # Standard deviation of NBA game totals ≈ 12 points — Gaussian approximation
+    pace_signal = (features.get("home_pace_signal", 0.5) + features.get("away_pace_signal", 0.5)) / 2.0
+    form_edge = (_centered_signal("home_form_rating") - _centered_signal("away_form_rating"))
+    market_edge = float(np.clip((home_prob - 0.5) * 2.0, -1.0, 1.0))
+    espn_edge = _centered_signal("home_espn_win_pct") - _centered_signal("away_espn_win_pct")
+
+    # Use team point stats when available, but keep markets responsive even if upstream
+    # team-stat scraping falls back to league-average defaults.
+    stats_defaultish = (
+        abs(home_pts - 110.0) < 0.2 and abs(away_pts - 110.0) < 0.2
+        and abs(home_allowed - 110.0) < 0.2 and abs(away_allowed - 110.0) < 0.2
+    )
+
+    baseline_total = raw_home + raw_away
+    if stats_defaultish:
+        baseline_total = 221.5 + (pace_signal - 0.5) * 18.0 + market_edge * 7.0
+    else:
+        baseline_total += (pace_signal - 0.5) * 10.0 + market_edge * 4.0
+    total_expected = float(np.clip(baseline_total, 198.0, 246.0))
+
+    spread_from_scoring = raw_home - raw_away
+    spread_from_signals = market_edge * 8.5 + form_edge * 5.0 + espn_edge * 4.0 + 1.8
+    if stats_defaultish:
+        spread_expected = spread_from_signals
+    else:
+        spread_expected = 0.55 * spread_from_scoring + 0.45 * spread_from_signals
+    spread_expected = float(np.clip(spread_expected, -18.5, 18.5))
+
+    home_expected = float(np.clip(total_expected / 2.0 + spread_expected / 2.0, 85.0, 140.0))
+    away_expected = float(np.clip(total_expected - home_expected, 85.0, 140.0))
+    total_expected = round(home_expected + away_expected, 1)
+
     sigma = 12.0
     lines = [195.5, 205.5, 215.5, 220.5, 225.5, 230.5, 235.5]
-    ou_markets: Dict[str, Any] = {"expected_total": round(total_expected, 1)}
+    ou_markets: Dict[str, Any] = {
+        "expected_total": total_expected,
+        "source": "adaptive_model" if stats_defaultish else "team_stats_plus_signals",
+    }
     from scipy.stats import norm
     for line in lines:
         p_over = float(np.clip(1.0 - norm.cdf(line, total_expected, sigma), 0.01, 0.99))
         key = f"line_{int(line)}"
         ou_markets[key] = {"over": round(p_over, 4), "under": round(1 - p_over, 4)}
 
-    spread_expected = home_expected - away_expected  # positive = home favoured
     return {
         "points_over_under": ou_markets,
         "expected_spread": round(spread_expected, 1),

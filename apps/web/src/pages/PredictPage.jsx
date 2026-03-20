@@ -264,23 +264,6 @@ export default function PredictPage() {
           {result.extended_markets && (
             <ExtendedMarketsPanel markets={result.extended_markets} sport={result.sport} />
           )}
-          <div className="card p-4">
-            <p className="label mb-3">
-              FEATURE VECTOR ({Object.keys(result.features_used || {}).length} features)
-            </p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {result.features_used && Object.entries(result.features_used).map(([k, v]) => (
-                <div key={k} className="bg-brand-darkgray border border-brand-midgray p-2 rounded-sm">
-                  <p className="font-display text-xs text-gray-600 truncate">
-                    {k.replace(/_/g, ' ').toUpperCase()}
-                  </p>
-                  <p className="font-display text-xs text-white mt-1 tabular-nums">
-                    {typeof v === 'number' ? v.toFixed(4) : String(v)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       )}
     </div>
