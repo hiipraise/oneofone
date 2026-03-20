@@ -1,5 +1,5 @@
 // src/pages/PredictPage.jsx
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { generatePrediction, validateMatch, getLiveLeagues } from '../services/api'
 import PredictionCard from '../components/PredictionCard'
 import ExtendedMarketsPanel from '../components/ExtendedMarketsPanel'
@@ -34,6 +34,8 @@ export default function PredictPage() {
   const { contract } = useApiContract()
   const sports = contract.supported_sports
   const teamNameMin = contract.field_limits.team_name.min
+  const validationRequestIdRef = useRef(0)
+  const leaguesRequestIdRef = useRef(0)
 
   const [form, setForm] = useState({
     home_team: '', away_team: '',
@@ -58,23 +60,47 @@ export default function PredictPage() {
     setLeagues([])
     setForm(p => ({ ...p, league: '' }))
     if (!form.sport) return
+    const requestId = leaguesRequestIdRef.current + 1
+    leaguesRequestIdRef.current = requestId
     setLeaguesLoading(true)
     getLiveLeagues(form.sport)
-      .then(res => setLeagues(res.data.leagues || []))
-      .catch(() => setLeagues([]))
-      .finally(() => setLeaguesLoading(false))
+      .then((res) => {
+        if (leaguesRequestIdRef.current !== requestId) return
+        setLeagues(res.data.leagues || [])
+      })
+      .catch(() => {
+        if (leaguesRequestIdRef.current !== requestId) return
+        setLeagues([])
+      })
+      .finally(() => {
+        if (leaguesRequestIdRef.current !== requestId) return
+        setLeaguesLoading(false)
+      })
   }, [form.sport])
 
   useEffect(() => {
     const t = setTimeout(() => {
       if (form.home_team.trim().length >= teamNameMin && form.away_team.trim().length >= teamNameMin) {
+        const requestId = validationRequestIdRef.current + 1
+        validationRequestIdRef.current = requestId
         setValidating(true)
         validateMatch(form.home_team, form.away_team, form.sport, form.match_date || undefined)
-          .then(res => setValidation(res.data))
-          .catch(() => setValidation(null))
-          .finally(() => setValidating(false))
+          .then((res) => {
+            if (validationRequestIdRef.current !== requestId) return
+            setValidation(res.data)
+          })
+          .catch(() => {
+            if (validationRequestIdRef.current !== requestId) return
+            setValidation(null)
+          })
+          .finally(() => {
+            if (validationRequestIdRef.current !== requestId) return
+            setValidating(false)
+          })
       } else {
+        validationRequestIdRef.current += 1
         setValidation(null)
+        setValidating(false)
       }
     }, 800)
     return () => clearTimeout(t)
