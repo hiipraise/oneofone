@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are the 1/1 Sports Analytics AI — a quantitative sports prediction system.
 
-Supported sports: Football/Soccer, Basketball, Tennis.
+Supported sports: Football/Soccer, Basketball.
 
 Core rules:
 - All probability outputs must be in [0, 1] format
@@ -38,7 +38,6 @@ When presenting predictions:
 - Relevant betting markets for the sport:
   • Soccer: 1X2, goals O/U, BTTS, Asian handicap, correct score, corners, cards
   • Basketball: points O/U, spread, moneyline
-  • Tennis: match winner, correct sets, total sets O/U, serve stats
 
 Response style: concise, analytical, data-driven. No filler."""
 
@@ -51,10 +50,6 @@ _SPORT_KEYWORDS: Dict[str, List[str]] = {
     "basketball": [
         "basketball", "nba", "euroleague", "ncaa basketball", "wnba",
         "points", "rebounds", "three-pointer", "slam dunk",
-    ],
-    "tennis": [
-        "tennis", "wimbledon", "us open", "australian open", "roland garros",
-        "french open", "atp", "wta", "grand slam", "set", "ace", "serve",
     ],
 }
 
@@ -189,10 +184,6 @@ async def process_chat(request) -> dict:
             elif sport_str == "basketball" and markets.get("basketball"):
                 bm = markets["basketball"]
                 search_context += f"  Total pts: {bm.get('expected_total', 'N/A')}\n"
-            elif sport_str == "tennis" and markets.get("tennis"):
-                tm = markets["tennis"]
-                cs = tm.get("correct_sets", [{}])[0]
-                search_context += f"  Top correct sets: {cs.get('score')} @ {cs.get('probability')}\n"
 
         except Exception as e:
             logger.error(f"Chat prediction error: {e}")

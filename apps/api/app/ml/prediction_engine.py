@@ -10,7 +10,6 @@ ML improvements over v1:
   - Analytical confidence interval via Beta distribution (replaces slow bootstrap)
   - Soft ensemble between ML model and prior (instead of hard switch)
   - Feature importance extraction logged at retrain
-  - Draw suppression for tennis
   - Calibration via isotonic (n≥100) or Platt sigmoid (n<100)
 
 Fix v2.1:
@@ -67,16 +66,9 @@ _BASKETBALL_EXTRA = [
     "home_pts_allowed_avg", "away_pts_allowed_avg",
     "home_pace_signal", "away_pace_signal",
 ]
-_TENNIS_EXTRA = [
-    "home_surface_win_rate", "away_surface_win_rate",
-    "home_serve_rating", "away_serve_rating",
-    "home_break_point_rate", "away_break_point_rate",
-]
-
 FEATURE_KEYS: Dict[str, List[str]] = {
     "soccer":     _COMMON_FEATURES + _SOCCER_EXTRA,
     "basketball": _COMMON_FEATURES + _BASKETBALL_EXTRA,
-    "tennis":     _COMMON_FEATURES + _TENNIS_EXTRA,
 }
 
 _DEFAULTS: Dict[str, float] = {
@@ -97,10 +89,6 @@ _DEFAULTS: Dict[str, float] = {
     "home_pts_avg": 0.5, "away_pts_avg": 0.5,
     "home_pts_allowed_avg": 0.5, "away_pts_allowed_avg": 0.5,
     "home_pace_signal": 0.5, "away_pace_signal": 0.5,
-    # tennis
-    "home_surface_win_rate": 0.5, "away_surface_win_rate": 0.5,
-    "home_serve_rating": 0.5, "away_serve_rating": 0.5,
-    "home_break_point_rate": 0.5, "away_break_point_rate": 0.5,
 }
 
 # Keys that carry raw values outside [0, 1] — must NOT be clipped in features_from_data
@@ -141,21 +129,6 @@ _PRIOR: Dict[str, Dict[str, float]] = {
         "home_pts_avg": 0.06, "away_pts_allowed_avg": 0.06,
         "away_pts_avg": -0.05, "home_pts_allowed_avg": -0.05,
         "home_pace_signal": 0.03, "away_pace_signal": -0.03,
-    },
-    "tennis": {
-        "home_form_rating": 0.26, "away_form_rating": -0.22,
-        "home_win_rate_signal": 0.18, "away_win_rate_signal": -0.14,
-        "home_ranking_signal": 0.15, "away_ranking_signal": -0.15,
-        "home_advantage_signal": 0.00,
-        "h2h_home_win_rate": 0.14,
-        "home_injury_impact": -0.10, "away_injury_impact": 0.10,
-        "implied_home_prob": 0.26, "implied_away_prob": -0.20,
-        "home_espn_win_pct": 0.10, "away_espn_win_pct": -0.08,
-        "home_momentum": 0.14, "away_momentum": -0.12,
-        "form_delta": 0.12,
-        "home_surface_win_rate": 0.12, "away_surface_win_rate": -0.10,
-        "home_serve_rating": 0.08, "away_serve_rating": -0.07,
-        "home_break_point_rate": 0.06, "away_break_point_rate": -0.05,
     },
 }
 
@@ -305,15 +278,6 @@ class PredictionEngine:
             f["home_pace_signal"]     = float(home_data.get("pace_signal", 0.5))
             f["away_pace_signal"]     = float(away_data.get("pace_signal", 0.5))
 
-        elif sport == "tennis":
-            f["home_surface_win_rate"]  = float(home_data.get("surface_win_rate", 0.5))
-            f["away_surface_win_rate"]  = float(away_data.get("surface_win_rate", 0.5))
-            f["home_serve_rating"]      = float(home_data.get("serve_rating", 0.5))
-            f["away_serve_rating"]      = float(away_data.get("serve_rating", 0.5))
-            f["home_break_point_rate"]  = float(home_data.get("break_point_rate", 0.5))
-            f["away_break_point_rate"]  = float(away_data.get("break_point_rate", 0.5))
-            f["home_advantage_signal"]  = 0.5
-
         # ── Clip only 0–1 signal features; leave raw stats untouched ──────────
         # Raw stat keys (e.g. goals averages > 1.0) must NOT be clipped to [0, 1].
         # Doing so was the bug: 1.40 → 1.0 causing xG to always read 1.00/1.00
@@ -337,17 +301,13 @@ class PredictionEngine:
             score += w * (features.get(feat, 0.5) - 0.5)
 
         home_prob = float(np.clip(score, 0.08, 0.85))
-        if sport == "tennis":
-            away_prob = float(np.clip(1.0 - home_prob, 0.08, 0.92))
-            draw_prob = 0.0
-        else:
-            evenness = 1.0 - abs(home_prob - 0.50) * 2.0
-            draw_prob = float(np.clip(0.26 * evenness, 0.04, 0.35))
-            away_prob = float(np.clip(1.0 - home_prob - draw_prob, 0.05, 0.85))
+        evenness = 1.0 - abs(home_prob - 0.50) * 2.0
+        draw_prob = float(np.clip(0.26 * evenness, 0.04, 0.35))
+        away_prob = float(np.clip(1.0 - home_prob - draw_prob, 0.05, 0.85))
 
         total = home_prob + away_prob + draw_prob
         if total <= 0:
-            return (0.5, 0.5, 0.0) if sport == "tennis" else (1/3, 1/3, 1/3)
+            return (1/3, 1/3, 1/3)
         return home_prob / total, away_prob / total, draw_prob / total
 
     def _ml_weight(self, sport: str) -> float:
@@ -382,8 +342,6 @@ class PredictionEngine:
                 ml_h = float(class_map.get(1, 0.33))
                 ml_a = float(class_map.get(0, 0.33))
                 ml_d = float(class_map.get(2, 0.0)) if 2 in class_map else max(0.0, 1.0 - ml_h - ml_a)
-                if sport == "tennis":
-                    ml_d = 0.0
 
                 # Soft ensemble: blend ML with prior
                 home_prob = w_ml * ml_h + (1 - w_ml) * prior_h
@@ -412,7 +370,7 @@ class PredictionEngine:
         predicted_outcome = max(probs_map, key=probs_map.__getitem__)
         winning_prob      = probs_map[predicted_outcome]
 
-        n_outcomes = 2 if sport == "tennis" else 3
+        n_outcomes = 3
         baseline   = 1.0 / n_outcomes
         confidence = float(np.clip((winning_prob - baseline) / (1.0 - baseline), 0.0, 1.0))
 
@@ -490,8 +448,6 @@ class PredictionEngine:
             feats   = rec.get("features", {})
             outcome = rec.get("actual_outcome")
             if not feats or outcome not in OUTCOME_MAP:
-                continue
-            if sport == "tennis" and outcome == "draw":
                 continue
 
             rows.append(self._fv(feats, sport))

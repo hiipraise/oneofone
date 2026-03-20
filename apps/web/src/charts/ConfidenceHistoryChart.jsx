@@ -10,12 +10,11 @@ import { useConfidenceHistory } from '../hooks/useData'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
-const SPORTS = ['soccer', 'basketball', 'tennis']
+const SPORTS = ['soccer', 'basketball']
 
 const SPORT_COLORS = {
   soccer:     { line: '#16a34a', fill: 'rgba(22,163,74,0.08)',   point: '#16a34a' },
   basketball: { line: '#eab308', fill: 'rgba(234,179,8,0.08)',   point: '#eab308' },
-  tennis:     { line: '#3b82f6', fill: 'rgba(59,130,246,0.08)',  point: '#3b82f6' },
 }
 
 const RANGE_OPTIONS = [

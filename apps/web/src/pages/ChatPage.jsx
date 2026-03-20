@@ -11,7 +11,6 @@ const SESSION_KEY = 'oneofone_session_id'
 const PROMPT_SUGGESTIONS = {
   soccer:     ['Predict Man City vs Arsenal', 'Real Madrid vs Barcelona prediction', 'Liverpool vs Chelsea odds'],
   basketball: ['Predict Lakers vs Celtics', 'Warriors vs Nuggets prediction', 'Bulls vs Heat odds'],
-  tennis:     ['Predict Djokovic vs Alcaraz', 'Sinner vs Medvedev prediction', 'Swiatek vs Sabalenka odds'],
 }
 
 // ─── Single message bubble ────────────────────────────────────────────────────
@@ -255,7 +254,7 @@ export default function ChatPage() {
       if (hist.length === 0) {
         setMessages([{
           role: 'assistant',
-          content: 'Session loaded. No messages yet — ask me anything about Football, Basketball, or Tennis.',
+          content: 'Session loaded. No messages yet — ask me anything about Football or Basketball.',
           timestamp: new Date().toISOString(),
         }])
       } else {
@@ -286,7 +285,7 @@ export default function ChatPage() {
     } catch {}
     setMessages([{
       role: 'assistant',
-      content: 'Welcome to 1/1 Sports Prediction AI.\n\nI run real-time web searches and quantitative models to generate calibrated probabilistic predictions.\n\nSupported sports: Football / Soccer · Basketball · Tennis\n\nAsk me about any upcoming match.',
+      content: 'Welcome to 1/1 Sports Prediction AI.\n\nI run real-time web searches and quantitative models to generate calibrated probabilistic predictions.\n\nSupported sports: Football / Soccer · Basketball\n\nAsk me about any upcoming match.',
       timestamp: new Date().toISOString(),
     }])
     setShowSuggestions(true)

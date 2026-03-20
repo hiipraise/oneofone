@@ -11,11 +11,10 @@ import { Bar } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
-const SPORTS = ['soccer', 'basketball', 'tennis']
+const SPORTS = ['soccer', 'basketball']
 const COLORS = {
   soccer: '#16a34a',
   basketball: '#eab308',
-  tennis: '#3b82f6',
 }
 
 function labelForSport(sport) {

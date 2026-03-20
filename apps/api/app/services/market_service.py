@@ -5,7 +5,6 @@ Extended Market Service — sport-aware
 Soccer:    1X2, goals O/U (0.5–4.5), BTTS, correct score, Asian handicap,
            corners O/U, bookings O/U
 Basketball: points O/U, spread, moneyline implied
-Tennis:    sets O/U, games O/U, correct sets
 
 Fix v2.1:
   - xG now uses BOTH attack (goals_scored_avg) and defence (goals_conceded_avg)
@@ -185,74 +184,6 @@ def _basketball_markets(features: Dict[str, float], home_prob: float) -> Dict[st
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Tennis markets
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _tennis_markets(features: Dict[str, float], home_prob: float) -> Dict[str, Any]:
-    """
-    Sets and games markets for tennis.
-    Approximate using player win probability per point → per game → per set.
-    """
-    # Point-win probability from match probability (logistic approximation)
-    # p_point ≈ 0.5 + 0.15 * (match_prob - 0.5)  (conservative scaling)
-    p_home_point = float(np.clip(0.5 + 0.15 * (home_prob - 0.5), 0.45, 0.65))
-
-    # P(win a game on serve) — Markov chain shortcut
-    def _pgame(p_serve: float) -> float:
-        q = 1 - p_serve
-        # P(win game from deuce) = p^2/(p^2+q^2)
-        p_deuce = p_serve ** 2 / (p_serve ** 2 + q ** 2) if (p_serve ** 2 + q ** 2) > 0 else 0.5
-        # P(win game) = sum of P(4-0..4-2) + P(deuce)*p_deuce
-        ways = sum(
-            math.comb(3 + k, k) * (p_serve ** 4) * ((1 - p_serve) ** k)
-            for k in range(3)
-        )
-        return ways + (p_serve ** 2) * ((1 - p_serve) ** 2) * 2 * p_deuce
-
-    # Home = player 1, Away = player 2
-    p_home_hold  = _pgame(p_home_point)
-    p_away_hold  = _pgame(1 - p_home_point)
-    p_home_break = 1 - p_away_hold
-
-    # Set win probability (simplified: 6 games, tiebreak at 6-6)
-    p_set_home = float(np.clip(
-        p_home_hold * 0.6 + p_home_break * 0.4,
-        0.15, 0.85
-    ))
-
-    # Best-of-3 (ATP 250/500, most WTA)
-    p_2_0 = p_set_home ** 2
-    p_2_1 = 2 * p_set_home ** 2 * (1 - p_set_home)
-    p_home_match = p_2_0 + p_2_1
-
-    # Correct sets
-    correct_sets = [
-        {"score": "2-0", "probability": round(float(p_2_0), 4)},
-        {"score": "2-1", "probability": round(float(p_2_1), 4)},
-        {"score": "1-2", "probability": round(float(2 * (1 - p_set_home) ** 2 * p_set_home), 4)},
-        {"score": "0-2", "probability": round(float((1 - p_set_home) ** 2), 4)},
-    ]
-    correct_sets.sort(key=lambda x: -x["probability"])
-
-    return {
-        "match_win": {"home": round(home_prob, 4), "away": round(1 - home_prob, 4)},
-        "correct_sets": correct_sets,
-        "set_handicap": {
-            "+1.5 home": round(float(p_home_match + p_2_1), 4),
-            "-1.5 home": round(float(p_2_0), 4),
-        },
-        "total_sets": {
-            "over_2.5": round(float(p_2_1 + 2 * (1 - p_set_home) ** 2 * p_set_home), 4),
-            "under_2.5": round(float(p_2_0 + (1 - p_set_home) ** 2), 4),
-        },
-        "serve_stats": {
-            "home_hold_rate": round(float(p_home_hold), 4),
-            "away_hold_rate": round(float(p_away_hold), 4),
-            "home_break_rate": round(float(p_home_break), 4),
-        },
-    }
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Master function
@@ -313,7 +244,5 @@ def compute_all_markets(features: Dict[str, float], sport: str) -> Dict[str, Any
                 "away_prob": round(1.0 - home_prob, 4),
             }
 
-    elif sport == "tennis":
-        markets["tennis"] = _tennis_markets(features, home_prob)
 
     return markets

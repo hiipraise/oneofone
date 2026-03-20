@@ -1,7 +1,7 @@
 # app/services/match_validation_service.py
 """
 Match Validation Service — The Odds API
-Supports: soccer, basketball, tennis only.
+Supports: soccer and basketball only.
 """
 import logging
 import re
@@ -42,16 +42,6 @@ SPORT_KEYS: Dict[str, List[str]] = {
         "basketball_euroleague",
         "basketball_ncaab",
         "basketball_nbl",
-    ],
-    "tennis": [
-        "tennis_atp_french_open",
-        "tennis_wta_french_open",
-        "tennis_atp_us_open",
-        "tennis_wta_us_open",
-        "tennis_atp_wimbledon",
-        "tennis_wta_wimbledon",
-        "tennis_atp_aus_open",
-        "tennis_wta_aus_open",
     ],
 }
 
@@ -268,7 +258,6 @@ def _sport_keywords(sport: str) -> List[str]:
     return {
         "soccer":     ["soccer"],
         "basketball": ["basketball"],
-        "tennis":     ["tennis"],
     }.get(sport.lower(), [sport.lower()])
 
 

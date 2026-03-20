@@ -14,7 +14,6 @@ import SportPerformanceChart from "../charts/SportPerformanceChart";
 const SPORT_DOTS = {
   soccer: "bg-brand-green",
   basketball: "bg-yellow-500",
-  tennis: "bg-blue-500",
 };
 
 // ── Quota panel ───────────────────────────────────────────────────────────────
@@ -177,7 +176,7 @@ function SportModelTable({ summary }) {
   const mlWeights = summary.ml_weights || {};
   const nSamples = summary.n_training_samples || {};
   const isTrained = summary.is_trained || {};
-  const sports = ["soccer", "basketball", "tennis"];
+  const sports = ["soccer", "basketball"];
 
   return (
     <div className="card overflow-hidden">

@@ -313,7 +313,6 @@ def search_serpapi(query: str, num_results: int = 5) -> List[Dict]:
 ESPN_SPORT_MAP = {
     "soccer":     ("soccer",     "eng.1"),
     "basketball": ("basketball", "nba"),
-    "tennis":     ("tennis",     "atp"),
 }
 ESPN_BASE = "https://site.api.espn.com/apis/site/v2/sports"
 
@@ -542,7 +541,6 @@ def _fetch_combined_team_data(team_name: str, sport: str) -> Dict[str, Any]:
     sport_terms = {
         "soccer":     "goals scored conceded clean sheets form results",
         "basketball": "points per game offensive defensive rating results",
-        "tennis":     "win rate serve statistics surface court results",
     }.get(sport, "form results statistics")
     query = f"{team_name} {sport_terms} injuries squad availability 2025"
 
@@ -597,12 +595,6 @@ def _parse_combined_text(text: str, team_name: str, sport: str) -> Dict[str, Any
         out["pts_allowed_avg"] = round(float(pts_all or 110.0), 1)
         out["pace_signal"]     = 0.5
 
-    elif sport == "tennis":
-        surf_pct  = _extract_float(text, r"(\d{2,3})%?\s+(?:win|winning)")
-        serve_pct = _extract_float(text, r"first\s+serve\s+(?:in|percentage)[:\s]+(\d{2,3})")
-        out["surface_win_rate"] = round(float((surf_pct  or 50.0) / 100.0), 3)
-        out["serve_rating"]     = round(float((serve_pct or 58.0) / 100.0), 3)
-        out["break_point_rate"] = 0.45
 
     return out
 
@@ -781,10 +773,6 @@ def fetch_team_stats(team_name: str, sport: str) -> Dict[str, Any]:
             "pts_allowed_avg",    combined.get("pts_allowed_avg", 110.0))
         stats["pace_signal"]        = combined.get("pace_signal", 0.5)
 
-    elif sport == "tennis":
-        stats["surface_win_rate"]   = combined.get("surface_win_rate",  0.5)
-        stats["serve_rating"]       = combined.get("serve_rating",      0.5)
-        stats["break_point_rate"]   = combined.get("break_point_rate",  0.45)
 
     # Override win_rate from RapidAPI if available (more accurate than scraped)
     if rapid_stats.get("win_rate_signal"):
@@ -802,7 +790,6 @@ def fetch_team_stats(team_name: str, sport: str) -> Dict[str, Any]:
 _ODDS_SPORT_MAP = {
     "soccer":     "soccer_epl",
     "basketball": "basketball_nba",
-    "tennis":     "tennis_atp_us_open",
 }
 
 

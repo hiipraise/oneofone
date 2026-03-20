@@ -142,121 +142,6 @@ function BasketballTab({ markets }) {
   )
 }
 
-// ─── Tennis tab ───────────────────────────────────────────────────────────────
-function TennisTab({ markets }) {
-  const tm = markets.tennis
-  if (!tm) return (
-    <p className="font-display text-xs text-gray-600">No tennis market data available.</p>
-  )
-
-  return (
-    <div className="flex flex-col gap-5">
-      {/* Match winner */}
-      {tm.match_win && (
-        <div>
-          <p className="label mb-3">MATCH WINNER</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex-1 p-4 bg-brand-darkgray border border-brand-midgray rounded-sm text-center">
-              <p className="label mb-1">PLAYER 1 (HOME)</p>
-              <p className="font-display text-2xl text-brand-greenlight">
-                {Math.round(tm.match_win.home * 100)}%
-              </p>
-            </div>
-            <div className="flex-1 p-4 bg-brand-darkgray border border-brand-midgray rounded-sm text-center">
-              <p className="label mb-1">PLAYER 2 (AWAY)</p>
-              <p className="font-display text-2xl text-brand-redlight">
-                {Math.round(tm.match_win.away * 100)}%
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Correct sets */}
-      {tm.correct_sets?.length > 0 && (
-        <div>
-          <p className="label mb-3">CORRECT SETS</p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {tm.correct_sets.map((cs, i) => (
-              <div
-                key={cs.score}
-                className={`border p-3 rounded-sm text-center ${
-                  i === 0
-                    ? 'border-brand-red bg-brand-reddark'
-                    : 'border-brand-midgray bg-brand-darkgray'
-                }`}
-              >
-                <p className="font-display text-sm text-white">{cs.score}</p>
-                <p className="font-display text-xs text-gray-500 mt-0.5">
-                  {Math.round(cs.probability * 100)}%
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Sets O/U */}
-      {tm.total_sets && (
-        <div>
-          <p className="label mb-3">TOTAL SETS</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {Object.entries(tm.total_sets).map(([label, prob]) => (
-              <div
-                key={label}
-                className="flex-1 p-3 bg-brand-darkgray border border-brand-midgray rounded-sm text-center"
-              >
-                <p className="label mb-1">{label.replace('_', ' ').toUpperCase()}</p>
-                <p className="font-display text-lg text-white">
-                  {Math.round(prob * 100)}%
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Serve stats */}
-      {tm.serve_stats && (
-        <div>
-          <p className="label mb-3">SERVE STATISTICS</p>
-          <div className="grid grid-cols-3 gap-2">
-            {[
-              { label: 'P1 HOLD%', val: tm.serve_stats.home_hold_rate },
-              { label: 'P2 HOLD%', val: tm.serve_stats.away_hold_rate },
-              { label: 'P1 BREAK%', val: tm.serve_stats.home_break_rate },
-            ].map(({ label, val }) => (
-              <div key={label} className="bg-brand-darkgray border border-brand-midgray p-3 rounded-sm text-center">
-                <p className="label mb-1">{label}</p>
-                <p className="font-display text-sm text-white">
-                  {val != null ? `${Math.round(val * 100)}%` : '—'}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Set handicap */}
-      {tm.set_handicap && (
-        <div>
-          <p className="label mb-3">SET HANDICAP</p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {Object.entries(tm.set_handicap).map(([label, prob]) => (
-              <div key={label} className="flex-1 p-3 bg-brand-darkgray border border-brand-midgray rounded-sm text-center">
-                <p className="label mb-1 text-gray-700">{label}</p>
-                <p className="font-display text-sm text-white">
-                  {Math.round(prob * 100)}%
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function ExtendedMarketsPanel({ markets, sport }) {
   const sportL = (sport || '').toLowerCase()
@@ -270,7 +155,6 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
     { key: 'bookings',      label: 'BOOKINGS',       sports: ['soccer'],            show: !!markets?.bookings },
     { key: 'asian',         label: 'ASIAN HC',       sports: ['soccer'],            show: !!markets?.asian_handicap },
     { key: 'basketball',    label: 'MARKETS',        sports: ['basketball'],        show: !!markets?.basketball },
-    { key: 'tennis',        label: 'MARKETS',        sports: ['tennis'],            show: !!markets?.tennis },
   ]
 
   const tabs = allTabs.filter(t => t.show && t.sports.includes(sportL))
@@ -428,8 +312,6 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
       {/* ── Basketball tab ── */}
       {tab === 'basketball' && <BasketballTab markets={markets} />}
 
-      {/* ── Tennis tab ── */}
-      {tab === 'tennis' && <TennisTab markets={markets} />}
     </div>
   )
 }

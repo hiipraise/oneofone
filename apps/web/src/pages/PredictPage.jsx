@@ -28,16 +28,6 @@ const PIPELINE_STEPS = {
     'Computing points O/U (Gaussian model)',
     'Computing spread and moneyline',
   ],
-  tennis: [
-    'Validating fixture in draw',
-    'Fetching player rankings + surface win rate',
-    'Fetching injury / withdrawal reports',
-    'Fetching head-to-head history',
-    'Fetching match odds signals',
-    'Running HistGradientBoosting + calibration (no draw)',
-    'Computing correct sets (Markov chain)',
-    'Computing games O/U and set handicap',
-  ],
 }
 
 export default function PredictPage() {
@@ -118,17 +108,17 @@ export default function PredictPage() {
     }
   }
 
-  const label1 = form.sport === 'tennis' ? 'PLAYER 1 (HOME)' : 'HOME TEAM'
-  const label2 = form.sport === 'tennis' ? 'PLAYER 2 (AWAY)' : 'AWAY TEAM'
-  const ph1    = form.sport === 'tennis' ? 'e.g. Novak Djokovic' : form.sport === 'basketball' ? 'e.g. LA Lakers' : 'e.g. Manchester City'
-  const ph2    = form.sport === 'tennis' ? 'e.g. Carlos Alcaraz' : form.sport === 'basketball' ? 'e.g. Boston Celtics' : 'e.g. Arsenal'
+  const label1 = 'HOME TEAM'
+  const label2 = 'AWAY TEAM'
+  const ph1    = form.sport === 'basketball' ? 'e.g. LA Lakers' : 'e.g. Manchester City'
+  const ph2    = form.sport === 'basketball' ? 'e.g. Boston Celtics' : 'e.g. Arsenal'
 
   return (
     <div className="max-w-3xl animate-fade-in">
       <div className="mb-6">
         <h1 className="font-display text-xl text-white tracking-wide">GENERATE PREDICTION</h1>
         <p className="font-body text-xs text-gray-600 mt-1">
-          Supports Football/Soccer · Basketball · Tennis — live data, extended markets
+          Supports Football/Soccer · Basketball — live data, extended markets
         </p>
       </div>
 

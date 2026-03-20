@@ -36,7 +36,7 @@ from app.services.result_resolver import resolve_results
 logger = logging.getLogger(__name__)
 
 # ── Supported sports ──────────────────────────────────────────────────────────
-_SUPPORTED_SPORTS: List[str] = ["soccer", "basketball", "tennis"]
+_SUPPORTED_SPORTS: List[str] = ["soccer", "basketball"]
 
 # ── APScheduler instance (exported so scheduler_route can inspect it) ─────────
 scheduler = BackgroundScheduler(timezone="UTC")
@@ -86,7 +86,6 @@ def _log_sync(level: str, message: str, **kwargs) -> None:
 _ODDS_SPORT_KEYS = {
     "soccer":     "soccer_epl",
     "basketball": "basketball_nba",
-    "tennis":     "tennis_atp_wimbledon",
 }
 
 
