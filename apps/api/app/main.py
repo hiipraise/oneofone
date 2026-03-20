@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config.settings import settings
 from app.config.database import connect_db, disconnect_db, get_db
 from app.scheduler.daily_scheduler import scheduler as daily_scheduler, start_scheduler, stop_scheduler
+from app.ml.prediction_engine import get_current_model_version
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 from app.routes import predictions, metrics, results, search, chat, scheduler as scheduler_routes, meta
@@ -44,7 +45,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title       = "1/1 Sports Prediction Engine",
     description = "Probabilistic sports prediction with ML + calibrated priors",
-    version     = settings.MODEL_VERSION,
+    version     = get_current_model_version(),
     lifespan    = lifespan,
 )
 
@@ -75,7 +76,7 @@ async def health():
     uptime_seconds = int((now - STARTED_AT_UTC).total_seconds())
     return {
         "status":  "ok",
-        "version": settings.MODEL_VERSION,
+        "version": get_current_model_version(),
         "timestamp": now.isoformat(),
         "uptime_seconds": uptime_seconds,
         "services": {
@@ -89,6 +90,6 @@ async def health():
 async def root():
     return {
         "app":     "1/1 Sports Prediction Engine",
-        "version": settings.MODEL_VERSION,
+        "version": get_current_model_version(),
         # "docs":    "/docs",
     }

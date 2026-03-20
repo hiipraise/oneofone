@@ -13,7 +13,7 @@ from app.config.api_contract import (
     TEAM_NAME_MAX_LENGTH,
     TEAM_NAME_MIN_LENGTH,
 )
-from app.config.settings import settings
+from app.ml.prediction_engine import get_current_model_version
 
 router = APIRouter()
 
@@ -22,7 +22,7 @@ router = APIRouter()
 async def frontend_contract():
     """Machine-readable API contract for frontend validation and UX constraints."""
     return {
-        "version": settings.MODEL_VERSION,
+        "version": get_current_model_version(),
         "supported_sports": list(SUPPORTED_SPORTS),
         "field_limits": {
             "team_name": {"min": TEAM_NAME_MIN_LENGTH, "max": TEAM_NAME_MAX_LENGTH},
