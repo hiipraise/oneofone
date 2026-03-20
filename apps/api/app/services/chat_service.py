@@ -33,7 +33,8 @@ Core rules:
 - Acknowledge data limitations clearly
 
 When presenting predictions:
-- Home win / Away win probabilities + Draw (soccer/basketball only)
+- Soccer: Home win / Draw / Away win probabilities
+- Basketball: Home win / Away win probabilities only (no draw market)
 - Model confidence score and interval
 - Relevant betting markets for the sport:
   • Soccer: 1X2, goals O/U, BTTS, Asian handicap, correct score, corners, cards
@@ -166,8 +167,11 @@ async def process_chat(request) -> dict:
             search_context += (
                 f"\n\nPrediction: {parsed['home_team']} vs {parsed['away_team']} [{sport_str}]\n"
                 f"  Home={prediction_output.home_win_probability:.4f}  "
-                f"Draw={prediction_output.draw_probability:.4f}  "
-                f"Away={prediction_output.away_win_probability:.4f}\n"
+                + (
+                    f"Draw={prediction_output.draw_probability:.4f}  "
+                    if sport_str == "soccer" else ""
+                )
+                + f"Away={prediction_output.away_win_probability:.4f}\n"
                 f"  Confidence: {prediction_output.confidence_score:.4f}  "
                 f"CI: [{prediction_output.confidence_interval_low:.3f}, "
                 f"{prediction_output.confidence_interval_high:.3f}]\n"
