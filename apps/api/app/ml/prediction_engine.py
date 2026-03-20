@@ -581,3 +581,7 @@ class PredictionEngine:
 
 # Singleton
 prediction_engine = PredictionEngine()
+
+
+def get_current_model_version() -> str:
+    return prediction_engine.model_version
