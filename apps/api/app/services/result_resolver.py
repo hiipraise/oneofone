@@ -24,7 +24,6 @@ logger = logging.getLogger(__name__)
 _ODDS_SPORT_KEYS = {
     "soccer":     "soccer_epl",
     "basketball": "basketball_nba",
-    "tennis":     "tennis_atp_wimbledon",
 }
 
 # How many past days to look back for completed scores
@@ -199,9 +198,6 @@ def _derive_outcome(home_score: int, away_score: int, sport: str) -> str:
         return "home_win"
     if away_score > home_score:
         return "away_win"
-    # Tennis has no draws — treat equal sets as away_win (shouldn't happen)
-    if sport == "tennis":
-        return "away_win"
     return "draw"
 
 
@@ -240,7 +236,7 @@ async def resolve_results() -> Dict:
     skipped  = 0
     errors   = 0
 
-    for sport in ["soccer", "basketball", "tennis"]:
+    for sport in ["soccer", "basketball"]:
         logger.info(f"[resolver] Fetching completed {sport} scores…")
         completed_games = _fetch_completed_scores(sport)
 

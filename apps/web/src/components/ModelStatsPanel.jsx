@@ -107,10 +107,9 @@ function fmtPct(v) { return v != null ? `${(v * 100).toFixed(1)}%` : null }
 const SPORT_DOTS = {
   soccer:     'bg-brand-green',
   basketball: 'bg-yellow-500',
-  tennis:     'bg-blue-500',
 }
 
-const SPORTS = ['soccer', 'basketball', 'tennis']
+const SPORTS = ['soccer', 'basketball']
 
 export default function ModelStatsPanel({ summary, loading }) {
   if (loading) return <Skeleton />
