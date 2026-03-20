@@ -1,0 +1,325 @@
+# app/services/match_validation_service.py
+"""
+Match Validation Service — The Odds API
+Supports: soccer, basketball, tennis only.
+"""
+import logging
+import re
+import unicodedata
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+
+import requests
+
+from app.config.settings import settings
+from app.services.web_search_service import _cache_key, _get_cached, _set_cache
+
+logger = logging.getLogger(__name__)
+
+ODDS_API_BASE = "https://api.the-odds-api.com/v4"
+
+SPORT_KEYS: Dict[str, List[str]] = {
+    "soccer": [
+        "soccer_epl",
+        "soccer_spain_la_liga",
+        "soccer_germany_bundesliga",
+        "soccer_italy_serie_a",
+        "soccer_france_ligue_one",
+        "soccer_uefa_champs_league",
+        "soccer_uefa_europa_league",
+        "soccer_usa_mls",
+        "soccer_portugal_primeira_liga",
+        "soccer_netherlands_eredivisie",
+        "soccer_brazil_campeonato",
+        "soccer_argentina_primera_division",
+        "soccer_turkey_super_league",
+        "soccer_saudi_premier_league",
+        "soccer_mexico_ligamx",
+        "soccer_conmebol_copa_libertadores",
+    ],
+    "basketball": [
+        "basketball_nba",
+        "basketball_euroleague",
+        "basketball_ncaab",
+        "basketball_nbl",
+    ],
+    "tennis": [
+        "tennis_atp_french_open",
+        "tennis_wta_french_open",
+        "tennis_atp_us_open",
+        "tennis_wta_us_open",
+        "tennis_atp_wimbledon",
+        "tennis_wta_wimbledon",
+        "tennis_atp_aus_open",
+        "tennis_wta_aus_open",
+    ],
+}
+
+_MIN_PREFIX = 4
+
+
+def fetch_available_leagues(sport: str) -> List[Dict]:
+    ck = _cache_key("leagues_v3", {"sport": sport})
+    cached = _get_cached(ck)
+    if cached is not None:
+        return cached
+
+    if not settings.ODDS_API_KEY:
+        return []
+
+    try:
+        resp = requests.get(
+            f"{ODDS_API_BASE}/sports",
+            params={"apiKey": settings.ODDS_API_KEY},
+            timeout=10,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.error(f"Odds API /sports error: {e}")
+        return []
+
+    known = set(SPORT_KEYS.get(sport.lower(), []))
+    kws = _sport_keywords(sport)
+    leagues = [
+        {
+            "id": item.get("key"),
+            "name": item.get("title", ""),
+            "country": item.get("group", ""),
+            "active": item.get("active", False),
+        }
+        for item in resp.json()
+        if item.get("key") in known
+        or any(kw in item.get("group", "").lower() for kw in kws)
+    ]
+
+    _set_cache(ck, leagues)
+    logger.info(f"Odds API leagues [{sport}]: {len(leagues)} found")
+    return leagues
+
+
+def search_fixtures(
+    home_team: str,
+    away_team: str,
+    sport: str,
+    date: Optional[str] = None,
+) -> Optional[Dict]:
+    ck = _cache_key("fixture_v3", {
+        "h": home_team.lower(), "a": away_team.lower(),
+        "s": sport, "d": date,
+    })
+    cached = _get_cached(ck)
+    if cached is not None:
+        return cached
+
+    if not settings.ODDS_API_KEY:
+        return None
+
+    for sport_key in SPORT_KEYS.get(sport.lower(), []):
+        result = _search_in_sport_key(home_team, away_team, sport_key, date)
+        if result:
+            _set_cache(ck, result)
+            logger.info(f"Fixture found [{sport_key}]: {result['home_team']} vs {result['away_team']}")
+            return result
+
+    # Dynamic fallback
+    for sport_key in _dynamic_sport_keys(sport):
+        if sport_key in SPORT_KEYS.get(sport.lower(), []):
+            continue
+        result = _search_in_sport_key(home_team, away_team, sport_key, date)
+        if result:
+            _set_cache(ck, result)
+            return result
+
+    logger.info(f"No fixture found: {home_team} vs {away_team} [{sport}]")
+    return None
+
+
+def fetch_today_fixtures(sport: str = "soccer") -> List[Dict]:
+    if not settings.ODDS_API_KEY:
+        return []
+
+    sport = sport.lower()
+    if sport not in SPORT_KEYS:
+        logger.warning(f"Unsupported sport for fixture fetch: {sport}")
+        return []
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    fixtures: List[Dict] = []
+    seen: set = set()
+
+    for sport_key in SPORT_KEYS[sport][:8]:
+        try:
+            resp = requests.get(
+                f"{ODDS_API_BASE}/sports/{sport_key}/events",
+                params={"apiKey": settings.ODDS_API_KEY, "dateFormat": "iso"},
+                timeout=10,
+            )
+            if resp.status_code == 401:
+                logger.error("Odds API: invalid key")
+                break
+            if resp.status_code in (404, 422):
+                continue
+            if resp.status_code != 200:
+                continue
+
+            for event in resp.json():
+                commence = event.get("commence_time", "")
+                if commence[:10] != today:
+                    continue
+                fid = event.get("id", "")
+                if fid in seen:
+                    continue
+                seen.add(fid)
+                fixtures.append({
+                    "fixture_id": fid,
+                    "home_team": event.get("home_team"),
+                    "away_team": event.get("away_team"),
+                    "sport": sport,
+                    "league": sport_key.replace("_", " ").title(),
+                    "league_id": sport_key,
+                    "match_date": today,
+                    "match_time": commence[11:16] if len(commence) > 10 else "",
+                    "validated": True,
+                    "source": "odds_api",
+                })
+        except Exception as e:
+            logger.warning(f"Fixture fetch error [{sport_key}]: {e}")
+
+    logger.info(f"Today fixtures: {len(fixtures)} [{sport}] for {today}")
+    return fixtures
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Internal helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _search_in_sport_key(
+    home: str, away: str, sport_key: str, target_date: Optional[str]
+) -> Optional[Dict]:
+    try:
+        resp = requests.get(
+            f"{ODDS_API_BASE}/sports/{sport_key}/events",
+            params={"apiKey": settings.ODDS_API_KEY, "dateFormat": "iso"},
+            timeout=10,
+        )
+        if resp.status_code in (401, 403, 404, 422):
+            return None
+        if resp.status_code != 200:
+            return None
+
+        for event in resp.json():
+            h = event.get("home_team", "")
+            a = event.get("away_team", "")
+            if not (_fuzzy_match(home, h) and _fuzzy_match(away, a)):
+                continue
+
+            commence   = event.get("commence_time", "")
+            event_date = commence[:10] if commence else ""
+
+            if target_date and event_date:
+                try:
+                    td = datetime.strptime(target_date, "%Y-%m-%d")
+                    ed = datetime.strptime(event_date, "%Y-%m-%d")
+                    if abs((td - ed).days) > 1:
+                        continue
+                except Exception:
+                    pass
+
+            return {
+                "fixture_id": event.get("id"),
+                "home_team": h,
+                "away_team": a,
+                "league_name": sport_key.replace("_", " ").title(),
+                "league_id": sport_key,
+                "match_date": event_date,
+                "match_time": commence[11:16] if len(commence) > 10 else "",
+                "validated": True,
+                "source": "odds_api",
+            }
+    except Exception as e:
+        logger.debug(f"Search error [{sport_key}]: {e}")
+    return None
+
+
+def _dynamic_sport_keys(sport: str) -> List[str]:
+    if not settings.ODDS_API_KEY:
+        return []
+    try:
+        resp = requests.get(
+            f"{ODDS_API_BASE}/sports",
+            params={"apiKey": settings.ODDS_API_KEY},
+            timeout=8,
+        )
+        if resp.status_code != 200:
+            return []
+        kws = _sport_keywords(sport)
+        return [
+            item["key"] for item in resp.json()
+            if any(
+                kw in item.get("group", "").lower() or kw in item.get("key", "").lower()
+                for kw in kws
+            )
+        ]
+    except Exception:
+        return []
+
+
+def _sport_keywords(sport: str) -> List[str]:
+    return {
+        "soccer":     ["soccer"],
+        "basketball": ["basketball"],
+        "tennis":     ["tennis"],
+    }.get(sport.lower(), [sport.lower()])
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fuzzy matching
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _norm(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii").lower()
+    s = re.sub(r"[^\w\s]", " ", s)
+    noise = r"\b(fc|cf|ac|sc|afc|bfc|as|ss|rc|ud|cd|rcd|sfc|bsc|if|sk|fk|ik|vfl|tsv|sv)\b"
+    s = re.sub(noise, " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _tokens(s: str) -> List[str]:
+    return [t for t in _norm(s).split() if len(t) >= 3]
+
+
+def _acronym(s: str) -> str:
+    return "".join(w[0] for w in _norm(s).split() if w)
+
+
+def _prefix_len(a: str, b: str) -> int:
+    n = 0
+    for ca, cb in zip(a, b):
+        if ca == cb:
+            n += 1
+        else:
+            break
+    return n
+
+
+def _fuzzy_match(inp: str, api: str) -> bool:
+    if not inp or not api:
+        return False
+    ni, na = _norm(inp), _norm(api)
+    if not ni or not na:
+        return False
+    if ni == na:
+        return True
+    if len(ni) >= 4 and (ni in na or na in ni):
+        return True
+    ti, ta = set(_tokens(ni)), set(_tokens(na))
+    if ti and ta and ti & ta:
+        return True
+    ai, aa = _acronym(inp), _acronym(api)
+    if (len(ai) >= 2 and (ai == na or ai == aa)) or (len(ni) >= 2 and ni == aa):
+        return True
+    for a in ([ni] + list(ti)):
+        for b in ([na] + list(ta)):
+            if _prefix_len(a, b) >= _MIN_PREFIX:
+                return True
+    return False

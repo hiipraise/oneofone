@@ -1,0 +1,404 @@
+# app/scheduler/daily_scheduler.py
+"""
+Daily sports prediction scheduler.
+
+Runs at the configured UTC hour, discovers today's fixtures via the Odds API,
+generates predictions for all supported sports, and writes structured logs to
+the `system_logs` MongoDB collection so the /api/scheduler/logs endpoint can
+surface them.
+
+Log document shape (required by scheduler route):
+  {
+    "source":    "daily_scheduler",
+    "level":     "INFO" | "WARNING" | "ERROR",
+    "message":   str,
+    "timestamp": datetime (UTC),
+    "sport":     str | None,   # optional context
+    "count":     int | None,   # optional prediction count
+  }
+"""
+import asyncio
+import logging
+import threading
+from datetime import datetime, timezone
+from typing import List, Dict, Any
+
+from apscheduler.schedulers.background import BackgroundScheduler
+
+from app.config.database import get_db
+from app.config.settings import settings
+from app.config.database import connect_db, disconnect_db
+import time
+from app.services.web_search_service import get_serpapi_usage
+from app.services.quota_service import record_serpapi_calls
+from app.services.result_resolver import resolve_results
+
+logger = logging.getLogger(__name__)
+
+# ── Supported sports ──────────────────────────────────────────────────────────
+_SUPPORTED_SPORTS: List[str] = ["soccer", "basketball", "tennis"]
+
+# ── APScheduler instance (exported so scheduler_route can inspect it) ─────────
+scheduler = BackgroundScheduler(timezone="UTC")
+
+
+# ── MongoDB log writer ────────────────────────────────────────────────────────
+
+async def _log_to_db(
+    level: str,
+    message: str,
+    sport: str | None = None,
+    count: int | None = None,
+    extra: Dict[str, Any] | None = None,
+) -> None:
+    """Write a structured log entry to db.system_logs."""
+    try:
+        db = get_db()
+        doc: Dict[str, Any] = {
+            "source":    "daily_scheduler",
+            "level":     level.upper(),
+            "message":   message,
+            "timestamp": datetime.now(timezone.utc),
+        }
+        if sport is not None:
+            doc["sport"] = sport
+        if count is not None:
+            doc["count"] = count
+        if extra:
+            doc.update(extra)
+        await db.system_logs.insert_one(doc)
+    except Exception as e:
+        logger.warning(f"[scheduler] Failed to write log to DB: {e}")
+
+
+def _log_sync(level: str, message: str, **kwargs) -> None:
+    """Sync wrapper — runs the async log writer in the event loop."""
+    try:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(_log_to_db(level, message, **kwargs))
+        loop.close()
+    except Exception as e:
+        logger.warning(f"[scheduler] _log_sync error: {e}")
+
+
+# ── Odds API fixture discovery ────────────────────────────────────────────────
+
+_ODDS_SPORT_KEYS = {
+    "soccer":     "soccer_epl",
+    "basketball": "basketball_nba",
+    "tennis":     "tennis_atp_wimbledon",
+}
+
+
+async def _fetch_today_fixtures(sport: str) -> List[Dict]:
+    """Fetch upcoming fixtures for today from the Odds API — with retry."""
+    import requests
+
+    if not settings.ODDS_API_KEY:
+        logger.warning(f"[scheduler] ODDS_API_KEY not set — skipping {sport}")
+        return []
+
+    sport_key = _ODDS_SPORT_KEYS.get(sport, "soccer_epl")
+    today     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    for attempt in range(3):
+        try:
+            resp = requests.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
+                params={
+                    "apiKey":     settings.ODDS_API_KEY,
+                    "regions":    "us,uk",
+                    "markets":    "h2h",
+                    "oddsFormat": "decimal",
+                },
+                timeout=15,
+            )
+
+            if resp.status_code == 429:
+                wait = [5.0, 15.0][min(attempt, 1)]
+                logger.warning(
+                    f"[scheduler] Odds API 429 [{sport}] — "
+                    f"attempt {attempt + 1}/3, retrying in {wait}s"
+                )
+                time.sleep(wait)
+                continue
+
+            if resp.status_code != 200:
+                logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport}")
+                return []
+
+            fixtures = []
+            for game in resp.json():
+                if game.get("commence_time", "").startswith(today):
+                    fixtures.append({
+                        "home_team":  game.get("home_team", ""),
+                        "away_team":  game.get("away_team", ""),
+                        "sport":      sport,
+                        "match_date": today,
+                        "league":     game.get("sport_title", ""),
+                    })
+            return fixtures
+
+        except requests.exceptions.Timeout:
+            wait = [5.0, 15.0][min(attempt, 1)]
+            logger.warning(
+                f"[scheduler] Odds API timeout [{sport}] — "
+                f"attempt {attempt + 1}/3, retrying in {wait}s"
+            )
+            time.sleep(wait)
+
+        except Exception as e:
+            logger.error(f"[scheduler] Odds API error [{sport}]: {e}")
+            return []
+
+    logger.error(f"[scheduler] Odds API failed after 3 attempts [{sport}]")
+    return []
+
+
+# ── Core prediction runner ────────────────────────────────────────────────────
+
+async def _run_predictions_async() -> None:
+    """Main async body — runs inside a fresh event loop from run_daily_predictions()."""
+    from app.services.prediction_service import generate_prediction
+
+    run_start = datetime.now(timezone.utc)
+    await _log_to_db("INFO", f"Daily scheduler started — {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
+
+    # Snapshot Serper usage before the run so we can record the delta at the end
+    serper_before = get_serpapi_usage()["used"]
+
+    total_generated = 0
+    total_errors    = 0
+
+    for sport in _SUPPORTED_SPORTS:
+        await _log_to_db("INFO", f"Discovering fixtures for {sport}…", sport=sport)
+
+        try:
+            fixtures = await _fetch_today_fixtures(sport)
+
+            if not fixtures:
+                await _log_to_db(
+                    "WARNING",
+                    f"No {sport} fixtures found for today — skipping",
+                    sport=sport, count=0,
+                )
+                continue
+
+            await _log_to_db(
+                "INFO",
+                f"Found {len(fixtures)} {sport} fixtures — generating predictions",
+                sport=sport, count=len(fixtures),
+            )
+
+            sport_generated = 0
+            sport_errors    = 0
+
+            for fixture in fixtures:
+                try:
+                    await generate_prediction(
+                        home_team  = fixture["home_team"],
+                        away_team  = fixture["away_team"],
+                        sport      = sport,
+                        match_date = fixture["match_date"],
+                        league     = fixture.get("league"),
+                    )
+                    sport_generated += 1
+                    total_generated += 1
+                except Exception as e:
+                    sport_errors += 1
+                    total_errors += 1
+                    logger.error(
+                        f"[scheduler] Prediction failed "
+                        f"[{fixture['home_team']} vs {fixture['away_team']}]: {e}"
+                    )
+                    await _log_to_db(
+                        "ERROR",
+                        f"Prediction failed: {fixture['home_team']} vs {fixture['away_team']} — {e}",
+                        sport=sport,
+                    )
+
+            await _log_to_db(
+                "INFO",
+                f"Completed {sport}: {sport_generated} generated, {sport_errors} errors",
+                sport=sport, count=sport_generated,
+            )
+
+        except Exception as e:
+            total_errors += 1
+            logger.error(f"[scheduler] Sport loop error [{sport}]: {e}")
+            await _log_to_db("ERROR", f"{sport} processing failed: {e}", sport=sport)
+
+    # ── Persist Serper quota delta to MongoDB (awaited — no fire-and-forget) ──
+    serper_calls_made = get_serpapi_usage()["used"] - serper_before
+    if serper_calls_made > 0:
+        try:
+            await record_serpapi_calls(serper_calls_made)
+            logger.info(f"[scheduler] Recorded {serper_calls_made} Serper calls to quota store")
+        except Exception as e:
+            logger.warning(f"[scheduler] Quota recording failed: {e}")
+
+    elapsed = (datetime.now(timezone.utc) - run_start).seconds
+    await _log_to_db(
+        "INFO",
+        f"Daily scheduler complete — {total_generated} predictions generated, "
+        f"{total_errors} errors, {elapsed}s elapsed",
+        count=total_generated,
+    )
+    logger.info(
+        f"[scheduler] Run complete: {total_generated} generated, "
+        f"{total_errors} errors in {elapsed}s"
+    )
+
+
+def run_daily_predictions() -> None:
+    logger.info("[scheduler] run_daily_predictions() called")
+
+    async def _run():
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from app.config import database as db_module
+
+        _saved_db     = db_module.db
+        _saved_client = db_module.client
+
+        _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
+        _sched_db     = _sched_client[settings.MONGODB_DB]
+
+        db_module.db     = _sched_db
+        db_module.client = _sched_client
+
+        try:
+            await _run_predictions_async()
+        finally:
+            try:
+                _sched_client.close()
+            except Exception:
+                pass
+            db_module.db     = _saved_db
+            db_module.client = _saved_client
+            logger.info("[scheduler] DB client restored to FastAPI's loop")
+
+    loop = None   # ← initialise before try so finally can always reference it
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[scheduler] Fatal error in run_daily_predictions: {e}")
+        _log_sync("ERROR", f"Fatal scheduler error: {e}")
+    finally:
+        if loop is not None:   # ← guard against the case where new_event_loop() itself failed
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+
+# ── Result resolution runner ──────────────────────────────────────────────────
+
+async def _run_resolution_async() -> None:
+    """Fetch completed scores and auto-submit actual results."""
+    run_start = datetime.now(timezone.utc)
+    await _log_to_db("INFO", f"Result resolver started — {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
+
+    try:
+        summary = await resolve_results()
+        await _log_to_db(
+            "INFO",
+            f"Result resolver complete — {summary['resolved']} resolved, "
+            f"{summary['skipped']} skipped, {summary['errors']} errors",
+            count=summary["resolved"],
+        )
+        logger.info(f"[resolver] Complete: {summary}")
+    except Exception as e:
+        logger.error(f"[resolver] Fatal error: {e}")
+        await _log_to_db("ERROR", f"Result resolver failed: {e}")
+
+
+def run_result_resolution() -> None:
+    """
+    Sync entry point for APScheduler — same isolated DB client pattern
+    as run_daily_predictions so FastAPI's Motor client is never touched.
+    """
+    logger.info("[resolver] run_result_resolution() called")
+
+    async def _run():
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from app.config import database as db_module
+
+        _saved_db     = db_module.db
+        _saved_client = db_module.client
+
+        _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
+        _sched_db     = _sched_client[settings.MONGODB_DB]
+
+        db_module.db     = _sched_db
+        db_module.client = _sched_client
+
+        try:
+            await _run_resolution_async()
+        finally:
+            try:
+                _sched_client.close()
+            except Exception:
+                pass
+            db_module.db     = _saved_db
+            db_module.client = _saved_client
+            logger.info("[resolver] DB client restored to FastAPI's loop")
+
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[resolver] Fatal error in run_result_resolution: {e}")
+        _log_sync("ERROR", f"Fatal resolver error: {e}")
+    finally:
+        if loop is not None:
+            try:
+                loop.close()
+            except Exception:
+                pass
+# ── APScheduler setup ─────────────────────────────────────────────────────────
+
+def start_scheduler() -> None:
+    if scheduler.running:
+        logger.info("[scheduler] Already running — skipping start")
+        return
+
+    # Job 1 — daily predictions (morning)
+    scheduler.add_job(
+        run_daily_predictions,
+        trigger  = "cron",
+        id       = "daily_predictions",
+        hour     = settings.DAILY_PREDICTION_HOUR,
+        minute   = settings.DAILY_PREDICTION_MINUTE,
+        replace_existing   = True,
+        misfire_grace_time = 3600,
+    )
+
+    # Job 2 — result auto-resolution (evening, after games finish)
+    scheduler.add_job(
+        run_result_resolution,
+        trigger  = "cron",
+        id       = "result_resolution",
+        hour     = settings.RESULT_RESOLUTION_HOUR,
+        minute   = settings.RESULT_RESOLUTION_MINUTE,
+        replace_existing   = True,
+        misfire_grace_time = 3600,
+    )
+
+    scheduler.start()
+    logger.info(
+        f"[scheduler] Started — predictions at "
+        f"{settings.DAILY_PREDICTION_HOUR:02d}:{settings.DAILY_PREDICTION_MINUTE:02d} UTC, "
+        f"resolution at "
+        f"{settings.RESULT_RESOLUTION_HOUR:02d}:{settings.RESULT_RESOLUTION_MINUTE:02d} UTC"
+    )
+
+
+def stop_scheduler() -> None:
+    """Graceful shutdown — call from FastAPI shutdown event."""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        logger.info("[scheduler] Stopped")

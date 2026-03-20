@@ -1,0 +1,94 @@
+# app/main.py
+"""
+1/1 Sports Prediction Engine — FastAPI application entry point.
+"""
+import logging
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.config.settings import settings
+from app.config.database import connect_db, disconnect_db, get_db
+from app.scheduler.daily_scheduler import scheduler as daily_scheduler, start_scheduler, stop_scheduler
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+from app.routes import predictions, metrics, results, search, chat, scheduler as scheduler_routes, meta
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+STARTED_AT_UTC = datetime.now(timezone.utc)
+
+
+# ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting 1/1 Sports Prediction Engine…")
+    await connect_db()
+    start_scheduler()
+    logger.info("Startup complete.")
+    yield
+    # Shutdown
+    logger.info("Shutting down…")
+    stop_scheduler()
+    await disconnect_db()
+    logger.info("Shutdown complete.")
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title       = "1/1 Sports Prediction Engine",
+    description = "Probabilistic sports prediction with ML + calibrated priors",
+    version     = settings.MODEL_VERSION,
+    lifespan    = lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins     = settings.ALLOWED_ORIGINS,
+    allow_credentials = True,
+    allow_methods     = ["*"],
+    allow_headers     = ["*"],
+)
+
+
+# ── Routers ───────────────────────────────────────────────────────────────────
+app.include_router(predictions.router, prefix="/api/predictions", tags=["predictions"])
+app.include_router(metrics.router,     prefix="/api/metrics",     tags=["metrics"])
+app.include_router(results.router,     prefix="/api/results",     tags=["results"])
+app.include_router(search.router,      prefix="/api/search",      tags=["search"])
+app.include_router(chat.router,        prefix="/api/chat",        tags=["chat"])
+app.include_router(scheduler_routes.router,   prefix="/api/scheduler",   tags=["scheduler"])
+app.include_router(meta.router,        prefix="/api/meta",        tags=["meta"])
+
+
+# ── Health ────────────────────────────────────────────────────────────────────
+@app.get("/health", tags=["system"])
+async def health():
+    db_connected = get_db() is not None
+    now = datetime.now(timezone.utc)
+    uptime_seconds = int((now - STARTED_AT_UTC).total_seconds())
+    return {
+        "status":  "ok",
+        "version": settings.MODEL_VERSION,
+        "timestamp": now.isoformat(),
+        "uptime_seconds": uptime_seconds,
+        "services": {
+            "database": "up" if db_connected else "down",
+            "scheduler": "running" if daily_scheduler.running else "stopped",
+        },
+    }
+
+
+@app.get("/", tags=["system"])
+async def root():
+    return {
+        "app":     "1/1 Sports Prediction Engine",
+        "version": settings.MODEL_VERSION,
+        # "docs":    "/docs",
+    }
