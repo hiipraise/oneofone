@@ -101,7 +101,10 @@ async def create_prediction(request: PredictionRequest) -> PredictionOutput:
 
     # ── Extended markets ──────────────────────────────────────────────────────
     try:
-        markets = compute_all_markets(features, sport)
+        market_features = dict(features)
+        market_features["implied_home_prob"] = float(result.get("home_win_probability", features.get("implied_home_prob", 0.5)))
+        market_features["implied_away_prob"] = float(result.get("away_win_probability", features.get("implied_away_prob", 0.5)))
+        markets = compute_all_markets(market_features, sport)
     except Exception as e:
         logger.warning(f"Market calculation error: {e}")
         markets = None

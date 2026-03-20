@@ -196,7 +196,7 @@ export default function ConfidenceHistoryChart() {
   return (
     <div className="card p-4">
       {/* Header row */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="label">CONFIDENCE SCORE — HISTORY BY SPORT</p>
           <p className="font-display text-xs text-gray-700 mt-0.5">
@@ -205,7 +205,7 @@ export default function ConfidenceHistoryChart() {
         </div>
 
         {/* Time range pills */}
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {RANGE_OPTIONS.map(({ label, value }) => (
             <button
               key={value}
@@ -223,7 +223,7 @@ export default function ConfidenceHistoryChart() {
       </div>
 
       {/* Sport toggle chips */}
-      <div className="flex gap-2 mb-3">
+      <div className="flex flex-wrap gap-2 mb-3">
         {SPORTS.map(sport => {
           const c      = SPORT_COLORS[sport]
           const active = activeSports.includes(sport)
@@ -259,7 +259,7 @@ export default function ConfidenceHistoryChart() {
 
       {/* Summary stats row */}
       {!loading && rows.length > 0 && (
-        <div className="grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-brand-midgray">
+        <div className="grid grid-cols-1 gap-3 mt-4 pt-3 border-t border-brand-midgray sm:grid-cols-2 xl:grid-cols-3">
           {SPORTS.filter(s => activeSports.includes(s)).map(sport => {
             const sportRows = rows.filter(r => r.sport === sport)
             if (!sportRows.length) return null

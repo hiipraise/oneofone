@@ -36,6 +36,7 @@ function formatTime(iso) {
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: "Africa/Lagos",
       timeZoneName: "short",
     });
   } catch {
@@ -76,7 +77,7 @@ function StatusCard({ status, loading }) {
       {/* Scheduler state */}
       <div className="card p-4">
         <p className="label mb-2">SCHEDULER</p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div
             className={`w-2.5 h-2.5 rounded-full shrink-0 ${isOnline ? "bg-brand-green animate-pulse" : "bg-brand-red"}`}
           />
@@ -463,16 +464,16 @@ export default function SchedulerPage() {
   return (
     <div className="animate-fade-in space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="font-display text-xl text-white tracking-wide">
             DAILY SCHEDULER
           </h1>
           <p className="font-body text-xs text-gray-600 mt-1">
-            Automated prediction generation · Runs daily at configured UTC time
+            Automated prediction generation · Runs daily at configured WAT time
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
               setStatusLoading(true);
@@ -549,23 +550,6 @@ export default function SchedulerPage() {
         </div>
       )}
 
-      {trigMsg && (
-        <div
-          className={`font-display text-xs px-4 py-3 rounded-sm border ${
-            trigMsg.type === "success"
-              ? "text-brand-greenlight bg-brand-greendark border-brand-green"
-              : "text-brand-redlight bg-brand-reddark border-brand-red"
-          }`}
-        >
-          {trigMsg.text}
-          {trigMsg.type === "success" && (
-            <span className="text-gray-500 ml-2">
-              Results will appear below in ~30s
-            </span>
-          )}
-        </div>
-      )}
-
       {/* Status cards */}
       {/* Status cards — now 5 cards */}
       <section>
@@ -584,7 +568,7 @@ export default function SchedulerPage() {
             {/* Scheduler state */}
             <div className="card p-4">
               <p className="label mb-2">SCHEDULER</p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <div
                   className={`w-2.5 h-2.5 rounded-full shrink-0 ${status?.scheduler_running ? "bg-brand-green animate-pulse" : "bg-brand-red"}`}
                 />
@@ -639,7 +623,7 @@ export default function SchedulerPage() {
 
       {/* Per-sport breakdown */}
       {!statusLoading && (
-        <section className="grid grid-cols-3 gap-3">
+        <section className="grid grid-cols-1 gap-3 md:grid-cols-3">
           {SPORTS.map((s) => (
             <div
               key={s}
@@ -669,11 +653,11 @@ export default function SchedulerPage() {
 
       {/* Today's fixtures table */}
       <section>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col gap-3 mb-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="label">
             TODAY'S PREDICTIONS — {SPORT_LABEL[sport]?.toUpperCase()}
           </p>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {SPORTS.map((s) => (
               <button
                 key={s}
@@ -703,13 +687,13 @@ export default function SchedulerPage() {
           <div className="space-y-2">
             <p className="label">SCHEDULE</p>
             <p className="font-display text-xs text-gray-300">
-              Predictions — daily at configured UTC hour
+              Predictions — daily at configured WAT hour
             </p>
             <p className="font-display text-xs text-gray-600">
               Set via DAILY_PREDICTION_HOUR in .env
             </p>
             <p className="font-display text-xs text-gray-300 mt-2">
-              Resolution — daily at 23:00 UTC
+              Resolution — daily at 00:00 WAT
             </p>
             <p className="font-display text-xs text-gray-600">
               Set via RESULT_RESOLUTION_HOUR in .env
@@ -750,7 +734,7 @@ export default function SchedulerPage() {
 
       {/* Scheduler logs */}
       <section>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col gap-3 mb-3 lg:flex-row lg:items-center lg:justify-between">
           <p className="label">SCHEDULER LOGS</p>
           <span className="font-display text-xs text-gray-700">
             {logs.length} entries
