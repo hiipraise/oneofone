@@ -788,8 +788,25 @@ def fetch_team_stats(team_name: str, sport: str) -> Dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ODDS_SPORT_MAP = {
-    "soccer":     "soccer_epl",
-    "basketball": "basketball_nba",
+    "soccer": [
+        "soccer_epl",
+        "soccer_spain_la_liga",
+        "soccer_germany_bundesliga",
+        "soccer_italy_serie_a",
+        "soccer_france_ligue_one",
+        "soccer_uefa_champs_league",
+        "soccer_uefa_europa_league",
+        "soccer_usa_mls",
+        "soccer_portugal_primeira_liga",
+        "soccer_netherlands_eredivisie",
+        "soccer_brazil_campeonato",
+        "soccer_argentina_primera_division",
+        "soccer_turkey_super_league",
+        "soccer_saudi_premier_league",
+        "soccer_mexico_ligamx",
+        "soccer_conmebol_copa_libertadores",
+    ],
+    "basketball": ["basketball_nba"],
 }
 
 
@@ -808,52 +825,56 @@ def fetch_betting_odds(home_team: str, away_team: str, sport: str) -> Dict[str, 
     if not settings.ODDS_API_KEY:
         return result
 
-    sport_key = _ODDS_SPORT_MAP.get(sport.lower(), "soccer_epl")
+    sport_keys = _ODDS_SPORT_MAP.get(sport.lower(), _ODDS_SPORT_MAP["soccer"])
     try:
-        resp = requests.get(
-            f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-            params={
-                "apiKey":      settings.ODDS_API_KEY,
-                "regions":     "us,uk",
-                "markets":     "h2h",
-                "oddsFormat":  "decimal",
-            },
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            return result
-
         hl, al = home_team.lower(), away_team.lower()
-        for game in resp.json():
-            gh = game.get("home_team", "").lower()
-            ga = game.get("away_team", "").lower()
-            if not (_word_overlap(hl, gh) and _word_overlap(al, ga)):
+        for sport_key in sport_keys:
+            resp = requests.get(
+                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
+                params={
+                    "apiKey":      settings.ODDS_API_KEY,
+                    "regions":     "us,uk",
+                    "markets":     "h2h",
+                    "oddsFormat":  "decimal",
+                },
+                timeout=10,
+            )
+            if resp.status_code != 200:
                 continue
 
-            home_probs, away_probs = [], []
-            for bk in game.get("bookmakers", [])[:5]:
-                for mkt in bk.get("markets", []):
-                    if mkt.get("key") != "h2h":
-                        continue
-                    for o in mkt.get("outcomes", []):
-                        price = float(o.get("price", 2.0))
-                        if price <= 1.0:
-                            continue
-                        imp  = 1.0 / price
-                        name = o.get("name", "").lower()
-                        if _word_overlap(hl, name):
-                            home_probs.append(imp)
-                        elif _word_overlap(al, name):
-                            away_probs.append(imp)
+            for game in resp.json():
+                gh = game.get("home_team", "").lower()
+                ga = game.get("away_team", "").lower()
+                if not (_word_overlap(hl, gh) and _word_overlap(al, ga)):
+                    continue
 
-            if home_probs and away_probs:
-                raw_h = float(np.mean(home_probs))
-                raw_a = float(np.mean(away_probs))
-                total = raw_h + raw_a
-                if total > 0:
-                    result["implied_home_prob"] = round(raw_h / total, 4)
-                    result["implied_away_prob"] = round(raw_a / total, 4)
-                    result["market_confidence"] = round(abs(raw_h / total - raw_a / total), 4)
+                home_probs, away_probs = [], []
+                for bk in game.get("bookmakers", [])[:5]:
+                    for mkt in bk.get("markets", []):
+                        if mkt.get("key") != "h2h":
+                            continue
+                        for o in mkt.get("outcomes", []):
+                            price = float(o.get("price", 2.0))
+                            if price <= 1.0:
+                                continue
+                            imp  = 1.0 / price
+                            name = o.get("name", "").lower()
+                            if _word_overlap(hl, name):
+                                home_probs.append(imp)
+                            elif _word_overlap(al, name):
+                                away_probs.append(imp)
+
+                if home_probs and away_probs:
+                    raw_h = float(np.mean(home_probs))
+                    raw_a = float(np.mean(away_probs))
+                    total = raw_h + raw_a
+                    if total > 0:
+                        result["implied_home_prob"] = round(raw_h / total, 4)
+                        result["implied_away_prob"] = round(raw_a / total, 4)
+                        result["market_confidence"] = round(abs(raw_h / total - raw_a / total), 4)
+                    break
+
+            if result["implied_home_prob"] is not None and result["implied_away_prob"] is not None:
                 break
 
     except Exception as e:

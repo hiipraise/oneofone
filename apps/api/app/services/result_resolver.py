@@ -17,14 +17,9 @@ from typing import List, Dict, Optional, Tuple
 import requests
 
 from app.config.settings import settings
+from app.services.match_validation_service import SPORT_KEYS
 
 logger = logging.getLogger(__name__)
-
-# ── Sport key mapping (same as scheduler) ─────────────────────────────────────
-_ODDS_SPORT_KEYS = {
-    "soccer":     "soccer_epl",
-    "basketball": "basketball_nba",
-}
 
 # How many past days to look back for completed scores
 _DAYS_FROM = 2
@@ -40,81 +35,86 @@ def _fetch_completed_scores(sport: str) -> List[Dict]:
     if not settings.ODDS_API_KEY:
         return []
 
-    sport_key = _ODDS_SPORT_KEYS.get(sport, "soccer_epl")
+    sport_keys = SPORT_KEYS.get(sport, SPORT_KEYS["soccer"])
 
     for attempt in range(3):
         try:
-            resp = requests.get(
-                f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores",
-                params={
-                    "apiKey":   settings.ODDS_API_KEY,
-                    "daysFrom": _DAYS_FROM,
-                },
-                timeout=15,
-            )
-
-            if resp.status_code == 429:
-                wait = [5.0, 15.0][min(attempt, 1)]
-                logger.warning(
-                    f"[resolver] Odds API 429 [{sport}] — "
-                    f"attempt {attempt + 1}/3, retrying in {wait}s"
-                )
-                time.sleep(wait)
-                continue
-
-            if resp.status_code != 200:
-                logger.warning(f"[resolver] Odds API scores {resp.status_code} [{sport}]")
-                return []
-
             completed = []
-            for game in resp.json():
-                if not game.get("completed"):
+            seen = set()
+            for sport_key in sport_keys:
+                resp = requests.get(
+                    f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores",
+                    params={
+                        "apiKey":   settings.ODDS_API_KEY,
+                        "daysFrom": _DAYS_FROM,
+                    },
+                    timeout=15,
+                )
+
+                if resp.status_code == 429:
+                    wait = [5.0, 15.0][min(attempt, 1)]
+                    logger.warning(
+                        f"[resolver] Odds API 429 [{sport_key}] — "
+                        f"attempt {attempt + 1}/3, retrying in {wait}s"
+                    )
+                    time.sleep(wait)
+                    completed = []
+                    break
+
+                if resp.status_code != 200:
+                    logger.warning(f"[resolver] Odds API scores {resp.status_code} [{sport_key}]")
                     continue
 
-                scores = game.get("scores") or []
-                if len(scores) < 2:
-                    continue
-
-                # Odds API: scores[0] = home team, scores[1] = away team
-                # Each score item: {"name": "Team", "score": "3"}
-                home_name  = game.get("home_team", "")
-                away_name  = game.get("away_team", "")
-
-                # Match score items to home/away by name
-                home_score_val = None
-                away_score_val = None
-                for s in scores:
-                    name = s.get("name", "")
-                    val  = s.get("score")
-                    if val is None:
+                for game in resp.json():
+                    if not game.get("completed"):
                         continue
-                    try:
-                        val = int(val)
-                    except (ValueError, TypeError):
+
+                    scores = game.get("scores") or []
+                    if len(scores) < 2:
                         continue
-                    if _names_match(name, home_name):
-                        home_score_val = val
-                    elif _names_match(name, away_name):
-                        away_score_val = val
 
-                if home_score_val is None or away_score_val is None:
-                    continue
+                    home_name  = game.get("home_team", "")
+                    away_name  = game.get("away_team", "")
 
-                # Parse date from commence_time
-                commence = game.get("commence_time", "")
-                try:
-                    match_date = commence[:10]  # "YYYY-MM-DD"
-                except Exception:
-                    continue
+                    home_score_val = None
+                    away_score_val = None
+                    for s in scores:
+                        name = s.get("name", "")
+                        val  = s.get("score")
+                        if val is None:
+                            continue
+                        try:
+                            val = int(val)
+                        except (ValueError, TypeError):
+                            continue
+                        if _names_match(name, home_name):
+                            home_score_val = val
+                        elif _names_match(name, away_name):
+                            away_score_val = val
 
-                completed.append({
-                    "home_team":   home_name,
-                    "away_team":   away_name,
-                    "home_score":  home_score_val,
-                    "away_score":  away_score_val,
-                    "match_date":  match_date,
-                    "sport":       sport,
-                })
+                    if home_score_val is None or away_score_val is None:
+                        continue
+
+                    match_date = game.get("commence_time", "")[:10]
+                    if not match_date:
+                        continue
+
+                    game_key = (home_name.lower(), away_name.lower(), match_date)
+                    if game_key in seen:
+                        continue
+                    seen.add(game_key)
+
+                    completed.append({
+                        "home_team":   home_name,
+                        "away_team":   away_name,
+                        "home_score":  home_score_val,
+                        "away_score":  away_score_val,
+                        "match_date":  match_date,
+                        "sport":       sport,
+                    })
+
+            if not completed and attempt < 2:
+                continue
 
             return completed
 

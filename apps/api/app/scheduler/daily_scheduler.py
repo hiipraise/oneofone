@@ -32,6 +32,7 @@ import time
 from app.services.web_search_service import get_serpapi_usage
 from app.services.quota_service import record_serpapi_calls
 from app.services.result_resolver import resolve_results
+from app.services.match_validation_service import SPORT_KEYS
 
 logger = logging.getLogger(__name__)
 
@@ -83,12 +84,6 @@ def _log_sync(level: str, message: str, **kwargs) -> None:
 
 # ── Odds API fixture discovery ────────────────────────────────────────────────
 
-_ODDS_SPORT_KEYS = {
-    "soccer":     "soccer_epl",
-    "basketball": "basketball_nba",
-}
-
-
 async def _fetch_today_fixtures(sport: str) -> List[Dict]:
     """Fetch upcoming fixtures for today from the Odds API — with retry."""
     import requests
@@ -97,38 +92,50 @@ async def _fetch_today_fixtures(sport: str) -> List[Dict]:
         logger.warning(f"[scheduler] ODDS_API_KEY not set — skipping {sport}")
         return []
 
-    sport_key = _ODDS_SPORT_KEYS.get(sport, "soccer_epl")
     today     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    sport_keys = SPORT_KEYS.get(sport, SPORT_KEYS["soccer"])
 
     for attempt in range(3):
         try:
-            resp = requests.get(
-                f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-                params={
-                    "apiKey":     settings.ODDS_API_KEY,
-                    "regions":    "us,uk",
-                    "markets":    "h2h",
-                    "oddsFormat": "decimal",
-                },
-                timeout=15,
-            )
-
-            if resp.status_code == 429:
-                wait = [5.0, 15.0][min(attempt, 1)]
-                logger.warning(
-                    f"[scheduler] Odds API 429 [{sport}] — "
-                    f"attempt {attempt + 1}/3, retrying in {wait}s"
-                )
-                time.sleep(wait)
-                continue
-
-            if resp.status_code != 200:
-                logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport}")
-                return []
-
             fixtures = []
-            for game in resp.json():
-                if game.get("commence_time", "").startswith(today):
+            seen = set()
+            for sport_key in sport_keys:
+                resp = requests.get(
+                    f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
+                    params={
+                        "apiKey":     settings.ODDS_API_KEY,
+                        "regions":    "us,uk",
+                        "markets":    "h2h",
+                        "oddsFormat": "decimal",
+                    },
+                    timeout=15,
+                )
+
+                if resp.status_code == 429:
+                    wait = [5.0, 15.0][min(attempt, 1)]
+                    logger.warning(
+                        f"[scheduler] Odds API 429 [{sport_key}] — "
+                        f"attempt {attempt + 1}/3, retrying in {wait}s"
+                    )
+                    time.sleep(wait)
+                    fixtures = []
+                    break
+
+                if resp.status_code != 200:
+                    logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport_key}")
+                    continue
+
+                for game in resp.json():
+                    if not game.get("commence_time", "").startswith(today):
+                        continue
+                    game_key = (
+                        game.get("home_team", "").lower(),
+                        game.get("away_team", "").lower(),
+                        today,
+                    )
+                    if game_key in seen:
+                        continue
+                    seen.add(game_key)
                     fixtures.append({
                         "home_team":  game.get("home_team", ""),
                         "away_team":  game.get("away_team", ""),
@@ -136,6 +143,8 @@ async def _fetch_today_fixtures(sport: str) -> List[Dict]:
                         "match_date": today,
                         "league":     game.get("sport_title", ""),
                     })
+            if not fixtures and attempt < 2:
+                continue
             return fixtures
 
         except requests.exceptions.Timeout:
