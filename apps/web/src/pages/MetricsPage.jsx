@@ -3,14 +3,13 @@ import React, { useState, useEffect } from "react";
 import {
   useMetricsSummary,
   useMetricsHistory,
-  usePredictions,
-  useResults,
   useQuota,
 } from "../hooks/useData";
 import ModelStatsPanel from "../components/ModelStatsPanel";
 import PaginationControls from "../components/PaginationControls";
 import { triggerLearning } from "../services/api";
 import ConfidenceHistoryChart from "../charts/ConfidenceHistoryChart";
+import SportPerformanceChart from "../charts/SportPerformanceChart";
 
 const SPORT_DOTS = {
   soccer: "bg-brand-green",
@@ -60,7 +59,7 @@ function QuotaPanel({ quota, loading }) {
 
   return (
     <div className="card p-5">
-      <div className="flex items-start justify-between mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-4">
         <div>
           {/* Updated: Serper.dev branding */}
           <p className="label mb-0.5">SEARCH QUOTA — SERPER.DEV</p>
@@ -84,7 +83,7 @@ function QuotaPanel({ quota, loading }) {
 
       {/* Main bar */}
       <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-2">
           <span className="font-display text-xs text-gray-500">Usage</span>
           <span className={`font-display text-2xl tabular-nums ${statusColor}`}>
             {quota.used}
@@ -97,7 +96,7 @@ function QuotaPanel({ quota, loading }) {
             style={{ width: `${Math.min(pct, 100)}%` }}
           />
         </div>
-        <div className="flex items-center justify-between mt-1.5">
+        <div className="flex items-center justify-between mt-1.5 gap-2">
           <span className="font-display text-xs text-gray-700">0</span>
           <span className="font-display text-xs text-gray-700">
             {quota.budget.toLocaleString()}
@@ -106,7 +105,7 @@ function QuotaPanel({ quota, loading }) {
       </div>
 
       {/* Stats grid */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="bg-brand-darkgray border border-brand-midgray rounded-sm p-3 text-center">
           <p className="label mb-1">USED</p>
           <p className={`font-display text-lg tabular-nums ${statusColor}`}>
@@ -365,8 +364,6 @@ export default function MetricsPage() {
     refetch,
   } = useMetricsSummary();
   const { data: history } = useMetricsHistory(60);
-  const { data: predictions } = usePredictions(null, 200);
-  const { data: results } = useResults(200);
   const { data: quota, loading: quotaLoading } = useQuota();
   const [triggering, setTriggering] = useState(false);
   const [trigMsg, setTrigMsg] = useState(null);
@@ -410,7 +407,7 @@ export default function MetricsPage() {
   return (
     <div className="animate-fade-in space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="font-display text-xl text-white tracking-wide">
             MODEL METRICS
@@ -530,8 +527,9 @@ export default function MetricsPage() {
       </section>
 
       {/* Charts */}
-      <section>
+      <section className="grid grid-cols-1 gap-4 2xl:grid-cols-2">
         <ConfidenceHistoryChart />
+        <SportPerformanceChart summary={summary} loading={summaryLoading} />
       </section>
 
       {/* Metrics history */}

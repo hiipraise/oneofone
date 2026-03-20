@@ -1,5 +1,5 @@
 // src/components/ExtendedMarketsPanel.jsx
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 
 function Prob({ value, label }) {
   if (value == null) return null
@@ -85,7 +85,7 @@ function BasketballTab({ markets }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="bg-brand-darkgray border border-brand-midgray p-3 rounded-sm text-center">
           <p className="label mb-1">EXPECTED TOTAL</p>
           <p className="font-display text-xl text-white">{ou.expected_total ?? '-'}</p>
@@ -123,7 +123,7 @@ function BasketballTab({ markets }) {
       )}
 
       {bm.moneyline && (
-        <div className="flex gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col items-center gap-1 p-4 bg-brand-darkgray border border-brand-midgray rounded-sm flex-1">
             <p className="label">HOME WIN</p>
             <p className="font-display text-lg text-brand-greenlight">
@@ -155,7 +155,7 @@ function TennisTab({ markets }) {
       {tm.match_win && (
         <div>
           <p className="label mb-3">MATCH WINNER</p>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex-1 p-4 bg-brand-darkgray border border-brand-midgray rounded-sm text-center">
               <p className="label mb-1">PLAYER 1 (HOME)</p>
               <p className="font-display text-2xl text-brand-greenlight">
@@ -200,7 +200,7 @@ function TennisTab({ markets }) {
       {tm.total_sets && (
         <div>
           <p className="label mb-3">TOTAL SETS</p>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {Object.entries(tm.total_sets).map(([label, prob]) => (
               <div
                 key={label}
@@ -241,7 +241,7 @@ function TennisTab({ markets }) {
       {tm.set_handicap && (
         <div>
           <p className="label mb-3">SET HANDICAP</p>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {Object.entries(tm.set_handicap).map(([label, prob]) => (
               <div key={label} className="flex-1 p-3 bg-brand-darkgray border border-brand-midgray rounded-sm text-center">
                 <p className="label mb-1 text-gray-700">{label}</p>
@@ -275,22 +275,23 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
 
   const tabs = allTabs.filter(t => t.show && t.sports.includes(sportL))
 
-  const [tab, setTab] = useState(() => tabs[0]?.key || '')
+  const [tab, setTab] = useState('')
+
+  useEffect(() => {
+    if (!tabs.length) return
+    if (!tabs.find(t => t.key === tab)) {
+      setTab(tabs[0].key)
+    }
+  }, [tab, tabs])
 
   if (!markets || !tabs.length) return null
-
-  // Reset tab if current tab no longer applies
-  if (!tabs.find(t => t.key === tab) && tabs.length) {
-    // Fire on next render
-    setTimeout(() => setTab(tabs[0].key), 0)
-  }
 
   return (
     <div className="card p-4">
       <p className="label mb-3">EXTENDED BETTING MARKETS</p>
 
       {/* Tabs */}
-      <div className="flex gap-1 flex-wrap mb-4">
+      <div className="flex gap-1 flex-wrap mb-4 overflow-x-auto pb-1">
         {tabs.map(t => (
           <TabBtn key={t.key} label={t.label} active={tab === t.key} onClick={() => setTab(t.key)} />
         ))}
@@ -299,7 +300,7 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
       {/* ── Soccer tabs ── */}
       {tab === 'goals' && markets.goals_over_under && (
         <div>
-          <div className="flex gap-4 mb-4">
+          <div className="grid grid-cols-1 gap-3 mb-4 sm:grid-cols-3">
             {[
               { label: 'EXPECTED GOALS', val: markets.goals_over_under.expected_goals?.toFixed(2), color: 'text-white' },
               { label: 'HOME xG', val: markets.goals_over_under.home_xg?.toFixed(2), color: 'text-brand-greenlight' },
@@ -320,11 +321,11 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
       )}
 
       {tab === 'btts' && markets.btts && (
-        <div className="flex gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {[
-            { label: 'GG (BOTH SCORE)', val: markets.btts.yes, sub: markets.btts.yes_pct },
-            { label: 'NG (NO GOAL)',    val: markets.btts.no,  sub: markets.btts.no_pct },
-          ].map(({ label, val, sub }) => (
+            { label: 'GG (BOTH SCORE)', val: markets.btts.yes },
+            { label: 'NG (NO GOAL)',    val: markets.btts.no },
+          ].map(({ label, val }) => (
             <div key={label} className="flex flex-col items-center gap-2 p-6 bg-brand-darkgray border border-brand-midgray rounded-sm">
               <span className="label">{label}</span>
               <Prob value={val} />
@@ -358,7 +359,7 @@ export default function ExtendedMarketsPanel({ markets, sport }) {
 
       {tab === 'corners' && markets.corners && (
         <div>
-          <div className="flex gap-4 mb-4">
+          <div className="grid grid-cols-1 gap-3 mb-4 sm:grid-cols-3">
             <div><span className="label">EXPECTED</span>
               <p className="font-display text-lg text-white mt-0.5">{markets.corners.expected_total ?? '-'}</p></div>
           </div>
