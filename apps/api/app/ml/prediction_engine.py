@@ -300,7 +300,15 @@ class PredictionEngine:
         for feat, w in weights.items():
             score += w * (features.get(feat, 0.5) - 0.5)
 
-        home_prob = float(np.clip(score, 0.08, 0.85))
+        home_prob = float(np.clip(score, 0.08, 0.92))
+
+        if sport == "basketball":
+            away_prob = float(np.clip(1.0 - home_prob, 0.08, 0.92))
+            total = home_prob + away_prob
+            if total <= 0:
+                return (0.5, 0.5, 0.0)
+            return home_prob / total, away_prob / total, 0.0
+
         evenness = 1.0 - abs(home_prob - 0.50) * 2.0
         draw_prob = float(np.clip(0.26 * evenness, 0.04, 0.35))
         away_prob = float(np.clip(1.0 - home_prob - draw_prob, 0.05, 0.85))
@@ -357,20 +365,24 @@ class PredictionEngine:
             w_ml = 0.0
 
         # Clamp and normalise
-        home_prob = float(np.clip(home_prob, 0.03, 0.94))
-        away_prob = float(np.clip(away_prob, 0.03, 0.94))
-        draw_prob = float(np.clip(draw_prob, 0.0,  0.42))
-        total = home_prob + away_prob + draw_prob
+        home_prob = float(np.clip(home_prob, 0.03, 0.97))
+        away_prob = float(np.clip(away_prob, 0.03, 0.97))
+        if sport == "basketball":
+            draw_prob = 0.0
+            total = home_prob + away_prob
+        else:
+            draw_prob = float(np.clip(draw_prob, 0.0,  0.42))
+            total = home_prob + away_prob + draw_prob
         home_prob, away_prob, draw_prob = home_prob / total, away_prob / total, draw_prob / total
 
         probs_map = {"home_win": home_prob, "away_win": away_prob}
-        if draw_prob > 0.0:
+        if sport != "basketball" and draw_prob > 0.0:
             probs_map["draw"] = draw_prob
 
         predicted_outcome = max(probs_map, key=probs_map.__getitem__)
         winning_prob      = probs_map[predicted_outcome]
 
-        n_outcomes = 3
+        n_outcomes = 2 if sport == "basketball" else 3
         baseline   = 1.0 / n_outcomes
         confidence = float(np.clip((winning_prob - baseline) / (1.0 - baseline), 0.0, 1.0))
 
@@ -474,12 +486,36 @@ class PredictionEngine:
         X = np.array(rows)
         y = np.array(labels)
         w = np.array(weights)
+        n = len(rows)
+
+        unique_classes, class_counts = np.unique(y, return_counts=True)
+        if len(unique_classes) < 2:
+            logger.warning(f"[{sport}] Retrain skipped — need at least 2 outcome classes, got {unique_classes.tolist()}")
+            return {
+                "status": "skipped",
+                "sport": sport,
+                "samples": len(rows),
+                "reason": "insufficient_class_diversity",
+            }
+
+        min_class_count = int(class_counts.min())
+        cv_splits = min(3, max(2, n // 20), min_class_count)
+        if cv_splits < 2:
+            logger.warning(
+                f"[{sport}] Retrain skipped — need at least 2 samples in each class for calibration CV; "
+                f"class_counts={dict(zip(unique_classes.tolist(), class_counts.tolist()))}"
+            )
+            return {
+                "status": "skipped",
+                "sport": sport,
+                "samples": len(rows),
+                "reason": "insufficient_class_support",
+            }
 
         self.scalers[sport].fit(X)
         X_scaled = self.scalers[sport].transform(X)
 
         # Reinitialise with correct calibration method based on sample size
-        n = len(rows)
         if n >= 100 and settings.CALIBRATION_METHOD != "sigmoid":
             cal_method: Literal["sigmoid", "isotonic"] = "isotonic"
         else:
@@ -493,7 +529,7 @@ class PredictionEngine:
         )
         self.models[sport] = CalibratedClassifierCV(
             base, method=cal_method,
-            cv=StratifiedKFold(n_splits=min(3, max(2, n // 20)), shuffle=True, random_state=42),
+            cv=StratifiedKFold(n_splits=cv_splits, shuffle=True, random_state=42),
         )
 
         self.models[sport].fit(X_scaled, y, sample_weight=w)  # type: ignore[union-attr]
@@ -559,7 +595,8 @@ class PredictionEngine:
         y  = np.array(actuals)
         ll = float(log_loss(y, p, labels=[0, 1]))
         bs = float(brier_score_loss(y, p))
-        accuracy = float(np.mean((p >= 0.5).astype(int) == y))
+        predicted_home = (p >= 0.5).astype(int)
+        accuracy = float(np.mean(predicted_home == y))
 
         n_bins = 10
         bin_edges = np.linspace(0, 1, n_bins + 1)
