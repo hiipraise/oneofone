@@ -5,16 +5,14 @@ import api from "../services/api";
 import PaginationControls from "../components/PaginationControls";
 import { triggerResolution } from "../services/api";
 
-const SPORTS = ["soccer", "basketball", "tennis"];
+const SPORTS = ["soccer", "basketball"];
 const SPORT_DOTS = {
   soccer: "bg-brand-green",
   basketball: "bg-yellow-500",
-  tennis: "bg-blue-500",
 };
 const SPORT_LABEL = {
   soccer: "Football / Soccer",
   basketball: "Basketball",
-  tennis: "Tennis",
 };
 
 function timeAgo(ts) {
@@ -225,9 +223,7 @@ function TodayTable({ fixtures, sport, loading }) {
                   </td>
                   <td className="px-4 py-3">
                     <span className="font-display text-xs text-gray-500 tabular-nums">
-                      {sport === "tennis"
-                        ? "—"
-                        : `${Math.round((row.draw_probability ?? 0) * 100)}%`}
+                      {`${Math.round((row.draw_probability ?? 0) * 100)}%`}
                     </span>
                   </td>
                   <td className="px-4 py-3">

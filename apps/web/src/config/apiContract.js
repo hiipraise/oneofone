@@ -1,6 +1,6 @@
 // src/config/apiContract.js
 
-export const FALLBACK_SUPPORTED_SPORTS = ['soccer', 'basketball', 'tennis']
+export const FALLBACK_SUPPORTED_SPORTS = ['soccer', 'basketball']
 
 export const DEFAULT_API_CONTRACT = {
   version: 'unknown',
@@ -35,7 +35,6 @@ export const DEFAULT_API_CONTRACT = {
 export const SPORT_LABELS = {
   soccer: 'Football / Soccer',
   basketball: 'Basketball',
-  tennis: 'Tennis',
 }
 
 export const normalizeContract = (payload) => {

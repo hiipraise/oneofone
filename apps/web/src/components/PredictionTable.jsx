@@ -199,9 +199,7 @@ export default function PredictionTable({ predictions = [], showSport = true, on
                     <td className="px-4 py-3">{pctCell(pred.home_win_probability, isHome)}</td>
                     {showSport && (
                       <td className="px-4 py-3">
-                        {pred.sport === 'tennis'
-                          ? <span className="font-display text-xs text-gray-700">—</span>
-                          : pctCell(pred.draw_probability)}
+                        {pctCell(pred.draw_probability)}
                       </td>
                     )}
                     <td className="px-4 py-3">{pctCell(pred.away_win_probability, isAway)}</td>

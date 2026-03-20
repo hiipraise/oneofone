@@ -7,7 +7,7 @@ import PredictionCard from '../components/PredictionCard'
 import { submitResult } from '../services/api'
 
 // Aligned with backend SportType enum
-const SPORTS = ['all', 'soccer', 'basketball', 'tennis']
+const SPORTS = ['all', 'soccer', 'basketball']
 
 export default function HistoryPage() {
   const [searchParams] = useSearchParams()
