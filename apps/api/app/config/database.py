@@ -1,7 +1,7 @@
-# app/config/database.py
 import logging
-from contextvars import ContextVar
-from typing import Optional
+from contextlib import contextmanager
+from contextvars import ContextVar, Token
+from typing import Optional, Iterator
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING
@@ -12,12 +12,8 @@ logger = logging.getLogger(__name__)
 client: Optional[AsyncIOMotorClient] = None
 db: Optional[AsyncIOMotorDatabase] = None
 
-# Scoped override — set only inside the scheduler's isolated event loop.
-# FastAPI's event loop never sees this value; it always reads None → falls
-# through to the global `db` bound to uvicorn's loop.
-_db_override: ContextVar[Optional[AsyncIOMotorDatabase]] = ContextVar(
-    "_db_override", default=None
-)
+_db_override: ContextVar[Optional[AsyncIOMotorDatabase]] = ContextVar("db_override", default=None)
+_client_override: ContextVar[Optional[AsyncIOMotorClient]] = ContextVar("client_override", default=None)
 
 
 async def connect_db():
@@ -30,41 +26,56 @@ async def connect_db():
 
 
 async def disconnect_db():
-    global client
+    global client, db
     if client:
         client.close()
         logger.info("MongoDB disconnected")
+    client = None
+    db = None
 
 
 async def create_indexes():
-    if db is None:
+    active_db = get_db()
+    if active_db is None:
         raise RuntimeError("Database connection has not been established")
-    await db.predictions.create_index([("match_id", ASCENDING)], unique=True)
-    await db.predictions.create_index([("date", DESCENDING)])
-    await db.predictions.create_index([("sport", ASCENDING)])
-    await db.predictions.create_index([("model_version", ASCENDING)])
+    await active_db.predictions.create_index([("match_id", ASCENDING)], unique=True)
+    await active_db.predictions.create_index([("date", DESCENDING)])
+    await active_db.predictions.create_index([("sport", ASCENDING)])
+    await active_db.predictions.create_index([("model_version", ASCENDING)])
 
-    await db.actual_results.create_index([("match_id", ASCENDING)], unique=True)
-    await db.actual_results.create_index([("date", DESCENDING)])
+    await active_db.actual_results.create_index([("match_id", ASCENDING)], unique=True)
+    await active_db.actual_results.create_index([("date", DESCENDING)])
 
-    await db.model_metrics.create_index([("date", DESCENDING)])
-    await db.model_metrics.create_index([("model_version", ASCENDING)])
+    await active_db.model_metrics.create_index([("date", DESCENDING)])
+    await active_db.model_metrics.create_index([("model_version", ASCENDING)])
 
-    await db.feature_snapshots.create_index([("match_id", ASCENDING)])
-    await db.feature_snapshots.create_index([("timestamp", DESCENDING)])
+    await active_db.feature_snapshots.create_index([("match_id", ASCENDING)])
+    await active_db.feature_snapshots.create_index([("timestamp", DESCENDING)])
 
-    await db.system_logs.create_index([("timestamp", DESCENDING)])
-    await db.system_logs.create_index([("level", ASCENDING)])
+    await active_db.system_logs.create_index([("timestamp", DESCENDING)])
+    await active_db.system_logs.create_index([("level", ASCENDING)])
+
+
+@contextmanager
+def override_db_context(
+    override_db: AsyncIOMotorDatabase,
+    override_client: Optional[AsyncIOMotorClient] = None,
+) -> Iterator[None]:
+    db_token: Token = _db_override.set(override_db)
+    client_token: Optional[Token] = None
+    try:
+        if override_client is not None:
+            client_token = _client_override.set(override_client)
+        yield
+    finally:
+        if client_token is not None:
+            _client_override.reset(client_token)
+        _db_override.reset(db_token)
+
+
+def get_client() -> Optional[AsyncIOMotorClient]:
+    return _client_override.get() or client
 
 
 def get_db() -> Optional[AsyncIOMotorDatabase]:
-    """
-    Returns the Motor database for the current execution context.
-
-    - Scheduler threads:  returns the per-run client set via _db_override,
-                          which is bound to their own event loop.
-    - FastAPI handlers:   _db_override is None (ContextVar default), so the
-                          global `db` bound to uvicorn's loop is returned.
-    """
-    override = _db_override.get()
-    return override if override is not None else db
+    return _db_override.get() or db

@@ -31,7 +31,7 @@ import time
 from app.services.web_search_service import get_serpapi_usage
 from app.services.quota_service import record_serpapi_calls
 from app.services.result_resolver import resolve_results
-from app.services.match_validation_service import SPORT_KEYS
+from app.services.match_validation_service import SPORT_KEYS, fetch_espn_today_fixtures
 
 logger = logging.getLogger(__name__)
 
@@ -84,82 +84,105 @@ def _log_sync(level: str, message: str, **kwargs) -> None:
 # ── Odds API fixture discovery ────────────────────────────────────────────────
 
 async def _fetch_today_fixtures(sport: str) -> List[Dict]:
-    """Fetch upcoming fixtures for today from the Odds API — with retry."""
+    """Fetch upcoming fixtures for today from the Odds API, then fall back to ESPN."""
     import requests
 
-    if not settings.ODDS_API_KEY:
-        logger.warning(f"[scheduler] ODDS_API_KEY not set — skipping {sport}")
-        return []
-
-    today      = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sport_keys = SPORT_KEYS.get(sport, SPORT_KEYS["soccer"])
+    should_fallback_to_espn = not bool(settings.ODDS_API_KEY)
 
-    for attempt in range(3):
-        try:
-            fixtures = []
-            seen = set()
-            for sport_key in sport_keys:
-                resp = requests.get(
-                    f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
-                    params={
-                        "apiKey":     settings.ODDS_API_KEY,
-                        "regions":    "us,uk",
-                        "markets":    "h2h",
-                        "oddsFormat": "decimal",
-                    },
-                    timeout=15,
-                )
-
-                if resp.status_code == 429:
-                    wait = [5.0, 15.0][min(attempt, 1)]
-                    logger.warning(
-                        f"[scheduler] Odds API 429 [{sport_key}] — "
-                        f"attempt {attempt + 1}/3, retrying in {wait}s"
+    if settings.ODDS_API_KEY:
+        for attempt in range(3):
+            try:
+                fixtures = []
+                seen = set()
+                auth_failed = False
+                for sport_key in sport_keys:
+                    resp = requests.get(
+                        f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
+                        params={
+                            "apiKey": settings.ODDS_API_KEY,
+                            "regions": "us,uk",
+                            "markets": "h2h",
+                            "oddsFormat": "decimal",
+                        },
+                        timeout=15,
                     )
-                    time.sleep(wait)
-                    fixtures = []
+
+                    if resp.status_code == 429:
+                        wait = [5.0, 15.0][min(attempt, 1)]
+                        logger.warning(
+                            f"[scheduler] Odds API 429 [{sport_key}] — "
+                            f"attempt {attempt + 1}/3, retrying in {wait}s"
+                        )
+                        time.sleep(wait)
+                        fixtures = []
+                        break
+
+                    if resp.status_code in (401, 403):
+                        logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport_key}; falling back to ESPN")
+                        auth_failed = True
+                        should_fallback_to_espn = True
+                        fixtures = []
+                        break
+
+                    if resp.status_code != 200:
+                        logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport_key}")
+                        continue
+
+                    for game in resp.json():
+                        if not game.get("commence_time", "").startswith(today):
+                            continue
+                        game_key = (
+                            game.get("home_team", "").lower(),
+                            game.get("away_team", "").lower(),
+                            today,
+                        )
+                        if game_key in seen:
+                            continue
+                        seen.add(game_key)
+                        fixtures.append({
+                            "home_team": game.get("home_team", ""),
+                            "away_team": game.get("away_team", ""),
+                            "sport": sport,
+                            "match_date": today,
+                            "league": game.get("sport_title", ""),
+                            "source": "odds_api",
+                        })
+
+                if auth_failed:
                     break
-
-                if resp.status_code != 200:
-                    logger.warning(f"[scheduler] Odds API {resp.status_code} for {sport_key}")
+                if fixtures:
+                    return fixtures
+                if attempt < 2:
                     continue
+            except requests.exceptions.Timeout:
+                wait = [5.0, 15.0][min(attempt, 1)]
+                logger.warning(
+                    f"[scheduler] Odds API timeout [{sport}] — "
+                    f"attempt {attempt + 1}/3, retrying in {wait}s"
+                )
+                time.sleep(wait)
+            except Exception as e:
+                logger.error(f"[scheduler] Odds API error [{sport}]: {e}")
+                should_fallback_to_espn = True
+                break
+    else:
+        logger.warning(f"[scheduler] ODDS_API_KEY not set — using ESPN fallback for {sport}")
 
-                for game in resp.json():
-                    if not game.get("commence_time", "").startswith(today):
-                        continue
-                    game_key = (
-                        game.get("home_team", "").lower(),
-                        game.get("away_team", "").lower(),
-                        today,
-                    )
-                    if game_key in seen:
-                        continue
-                    seen.add(game_key)
-                    fixtures.append({
-                        "home_team":  game.get("home_team", ""),
-                        "away_team":  game.get("away_team", ""),
-                        "sport":      sport,
-                        "match_date": today,
-                        "league":     game.get("sport_title", ""),
-                    })
-
-            if not fixtures and attempt < 2:
-                continue
+    if should_fallback_to_espn:
+        fixtures = fetch_espn_today_fixtures(sport)
+        if fixtures:
+            await _log_to_db(
+                "INFO",
+                f"Using ESPN fixtures fallback for {sport}: {len(fixtures)} found",
+                sport=sport,
+                count=len(fixtures),
+                extra={"fixture_source": "espn"},
+            )
             return fixtures
 
-        except requests.exceptions.Timeout:
-            wait = [5.0, 15.0][min(attempt, 1)]
-            logger.warning(
-                f"[scheduler] Odds API timeout [{sport}] — "
-                f"attempt {attempt + 1}/3, retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except Exception as e:
-            logger.error(f"[scheduler] Odds API error [{sport}]: {e}")
-            return []
-
-    logger.error(f"[scheduler] Odds API failed after 3 attempts [{sport}]")
+    logger.error(f"[scheduler] Fixture discovery failed [{sport}] — no Odds API or ESPN fixtures")
     return []
 
 
@@ -261,23 +284,21 @@ def run_daily_predictions() -> None:
 
     async def _run():
         from motor.motor_asyncio import AsyncIOMotorClient
+        from app.config.database import override_db_context
 
         _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
-        _sched_db     = _sched_client[settings.MONGODB_DB]
+        _sched_db = _sched_client[settings.MONGODB_DB]
 
-        # Scope this DB client to the current async context only.
-        # FastAPI's event loop never sees this value — it reads None from
-        # the ContextVar default and falls through to its own `db` global.
-        token = _db_override.set(_sched_db)
         try:
-            await _run_predictions_async()
+            with override_db_context(_sched_db, _sched_client):
+                await _run_predictions_async()
         finally:
             _db_override.reset(token)
             try:
                 _sched_client.close()
             except Exception:
                 pass
-            logger.info("[scheduler] DB client closed (predictions context)")
+            logger.info("[scheduler] Isolated scheduler DB client closed")
 
     loop = None
     try:
@@ -325,20 +346,21 @@ def run_result_resolution() -> None:
 
     async def _run():
         from motor.motor_asyncio import AsyncIOMotorClient
+        from app.config.database import override_db_context
 
         _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
-        _sched_db     = _sched_client[settings.MONGODB_DB]
+        _sched_db = _sched_client[settings.MONGODB_DB]
 
-        token = _db_override.set(_sched_db)
         try:
-            await _run_resolution_async()
+            with override_db_context(_sched_db, _sched_client):
+                await _run_resolution_async()
         finally:
             _db_override.reset(token)
             try:
                 _sched_client.close()
             except Exception:
                 pass
-            logger.info("[resolver] DB client closed (resolution context)")
+            logger.info("[resolver] Isolated resolver DB client closed")
 
     loop = None
     try:

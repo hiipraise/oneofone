@@ -45,36 +45,25 @@ SPORT_KEYS: Dict[str, List[str]] = {
     ],
 }
 
-# ── ESPN config (used by result_resolver) ─────────────────────────────────────
-# Free public scoreboard API — no key required.
-# URL pattern:
-#   https://site.api.espn.com/apis/site/v2/sports/{ESPN_SPORT_PATH[sport]}/{league}/scoreboard
 
-ESPN_SPORT_PATH: Dict[str, str] = {
-    "soccer":     "soccer",
-    "basketball": "basketball",
-}
 
-ESPN_LEAGUES: Dict[str, List[str]] = {
+ESPN_SCOREBOARD_LEAGUES: Dict[str, List[tuple[str, str, str]]] = {
     "soccer": [
-        "eng.1",          # Premier League
-        "esp.1",          # La Liga
-        "ger.1",          # Bundesliga
-        "ita.1",          # Serie A
-        "fra.1",          # Ligue 1
-        "uefa.champions", # Champions League
-        "uefa.europa",    # Europa League
-        "usa.1",          # MLS
-        "por.1",          # Primeira Liga
-        "ned.1",          # Eredivisie
-        "bra.1",          # Brasileirao
-        "arg.1",          # Primera Division
-        "tur.1",          # Super Lig
-        "mex.1",          # Liga MX
+        ("soccer", "eng.1", "Premier League"),
+        ("soccer", "esp.1", "LaLiga"),
+        ("soccer", "ger.1", "Bundesliga"),
+        ("soccer", "ita.1", "Serie A"),
+        ("soccer", "fra.1", "Ligue 1"),
+        ("soccer", "usa.1", "MLS"),
+        ("soccer", "por.1", "Primeira Liga"),
+        ("soccer", "ned.1", "Eredivisie"),
+        ("soccer", "mex.1", "Liga MX"),
+        ("soccer", "uefa.champions", "UEFA Champions League"),
+        ("soccer", "uefa.europa", "UEFA Europa League"),
     ],
     "basketball": [
-        "nba",
-        "mens-college-basketball",
+        ("basketball", "nba", "NBA"),
+        ("basketball", "mens-college-basketball", "NCAA Men's Basketball"),
     ],
 }
 
@@ -345,3 +334,62 @@ def _fuzzy_match(inp: str, api: str) -> bool:
             if _prefix_len(a, b) >= _MIN_PREFIX:
                 return True
     return False
+
+def fetch_espn_today_fixtures(sport: str = "soccer") -> List[Dict]:
+    sport = sport.lower()
+    leagues = ESPN_SCOREBOARD_LEAGUES.get(sport, [])
+    if not leagues:
+        return []
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    fixtures: List[Dict] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for espn_sport, league, league_name in leagues:
+        try:
+            resp = requests.get(
+                f"https://site.api.espn.com/apis/site/v2/sports/{espn_sport}/{league}/scoreboard",
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                continue
+
+            for event in resp.json().get("events", []):
+                commence = event.get("date", "")
+                if commence[:10] != today:
+                    continue
+
+                competition = (event.get("competitions") or [{}])[0]
+                competitors = competition.get("competitors") or []
+                home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+                away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+                if not home or not away:
+                    continue
+
+                home_name = home.get("team", {}).get("displayName") or home.get("team", {}).get("shortDisplayName")
+                away_name = away.get("team", {}).get("displayName") or away.get("team", {}).get("shortDisplayName")
+                if not home_name or not away_name:
+                    continue
+
+                dedupe_key = (home_name.lower(), away_name.lower(), today)
+                if dedupe_key in seen:
+                    continue
+                seen.add(dedupe_key)
+
+                fixtures.append({
+                    "fixture_id": event.get("id", ""),
+                    "home_team": home_name,
+                    "away_team": away_name,
+                    "sport": sport,
+                    "league": league_name,
+                    "league_id": league,
+                    "match_date": today,
+                    "match_time": commence[11:16] if len(commence) > 10 else "",
+                    "validated": True,
+                    "source": "espn",
+                })
+        except Exception as e:
+            logger.warning(f"ESPN fixture fetch error [{sport}:{league}]: {e}")
+
+    logger.info(f"Today fixtures from ESPN: {len(fixtures)} [{sport}] for {today}")
+    return fixtures
