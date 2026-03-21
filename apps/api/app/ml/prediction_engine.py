@@ -15,8 +15,13 @@ ML improvements over v1:
 Fix v2.1:
   - Raw stats (goals_scored_avg, goals_conceded_avg, pts_avg, pts_allowed_avg)
     are NOT 0–1 signals and must NOT be clipped to [0, 1] in features_from_data.
-    Previously this caused goals averages like 1.40 to be silently clamped to 1.0,
-    making xG always read 1.00 / 1.00 and BTTS probability permanently low (~40%).
+
+Fix v2.2:
+  - Removed manual model version bumping from retrain(). Previously every
+    retrain() call incremented the patch version AND wrote back to
+    settings.MODEL_VERSION, causing version drift across retrains and
+    filename mismatches after server restarts. Version is now stable for
+    the entire server lifetime and equals settings.MODEL_VERSION.
 """
 import logging
 import pickle
@@ -42,7 +47,7 @@ MODEL_DIR = "models"
 os.makedirs(MODEL_DIR, exist_ok=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Feature definitions (unchanged — stable interface)
+# Feature definitions
 # ─────────────────────────────────────────────────────────────────────────────
 
 _COMMON_FEATURES = [
@@ -91,12 +96,10 @@ _DEFAULTS: Dict[str, float] = {
     "home_pace_signal": 0.5, "away_pace_signal": 0.5,
 }
 
-# Keys that carry raw values outside [0, 1] — must NOT be clipped in features_from_data
+# Keys that carry raw values outside [0, 1] — must NOT be clipped
 _RAW_STAT_KEYS = frozenset({
     "home_goals_scored_avg", "home_goals_conceded_avg",
     "away_goals_scored_avg", "away_goals_conceded_avg",
-    # basketball pts are normalised to [0,1] before storage, so they're safe to clip
-    # but leaving them here in case raw values are ever passed directly
     "home_pts_avg", "away_pts_avg",
     "home_pts_allowed_avg", "away_pts_allowed_avg",
 })
@@ -135,8 +138,7 @@ _PRIOR: Dict[str, Dict[str, float]] = {
 OUTCOME_MAP  = {"home_win": 1, "away_win": 0, "draw": 2}
 OUTCOME_RMAP = {v: k for k, v in OUTCOME_MAP.items()}
 
-# ML weight grows with log(n_samples) — at 30 samples weight=0.25, at 300=0.62, at 1000=0.80
-_ML_WEIGHT_SCALE = 0.25  # w_ml = min(1.0, _ML_WEIGHT_SCALE * log10(n_samples))
+_ML_WEIGHT_SCALE = 0.25
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -150,6 +152,7 @@ class PredictionEngine:
         self.scalers: Dict[str, RobustScaler] = {s: RobustScaler() for s in FEATURE_KEYS}
         self.is_trained: Dict[str, bool] = {s: False for s in FEATURE_KEYS}
         self.n_training_samples: Dict[str, int] = {s: 0 for s in FEATURE_KEYS}
+        # Version is fixed for the server lifetime — never mutated after init
         self.model_version = settings.MODEL_VERSION
         self._load_all()
 
@@ -173,7 +176,6 @@ class PredictionEngine:
                         self.models[sport] = pickle.load(f)
                     with open(sp, "rb") as f:
                         self.scalers[sport] = pickle.load(f)
-                    # Load training metadata
                     if os.path.exists(self._meta_path(sport)):
                         with open(self._meta_path(sport), "rb") as f:
                             meta = pickle.load(f)
@@ -259,8 +261,6 @@ class PredictionEngine:
             f["implied_away_prob"] = float(odds_data["implied_away_prob"])
 
         if sport == "soccer":
-            # Raw goal averages — stored as-is (e.g. 1.40, 1.35).
-            # Do NOT normalise here; market_service consumes them directly.
             f["home_goals_scored_avg"]   = float(home_data.get("goals_scored_avg", 1.40))
             f["home_goals_conceded_avg"] = float(home_data.get("goals_conceded_avg", 1.10))
             f["away_goals_scored_avg"]   = float(away_data.get("goals_scored_avg", 1.15))
@@ -278,10 +278,6 @@ class PredictionEngine:
             f["home_pace_signal"]     = float(home_data.get("pace_signal", 0.5))
             f["away_pace_signal"]     = float(away_data.get("pace_signal", 0.5))
 
-        # ── Clip only 0–1 signal features; leave raw stats untouched ──────────
-        # Raw stat keys (e.g. goals averages > 1.0) must NOT be clipped to [0, 1].
-        # Doing so was the bug: 1.40 → 1.0 causing xG to always read 1.00/1.00
-        # and BTTS probability to be permanently stuck ~40%.
         for k in f:
             if k not in _RAW_STAT_KEYS:
                 f[k] = float(np.clip(f[k], 0.0, 1.0))
@@ -319,10 +315,6 @@ class PredictionEngine:
         return home_prob / total, away_prob / total, draw_prob / total
 
     def _ml_weight(self, sport: str) -> float:
-        """
-        How much to trust the ML model vs the prior.
-        Scales with log10(n_samples): 0 at n=0, ~0.5 at n=100, ~0.75 at n=1000.
-        """
         n = self.n_training_samples.get(sport, 0)
         if n < 30:
             return 0.0
@@ -351,7 +343,6 @@ class PredictionEngine:
                 ml_a = float(class_map.get(0, 0.33))
                 ml_d = float(class_map.get(2, 0.0)) if 2 in class_map else max(0.0, 1.0 - ml_h - ml_a)
 
-                # Soft ensemble: blend ML with prior
                 home_prob = w_ml * ml_h + (1 - w_ml) * prior_h
                 away_prob = w_ml * ml_a + (1 - w_ml) * prior_a
                 draw_prob = w_ml * ml_d + (1 - w_ml) * prior_d
@@ -364,7 +355,6 @@ class PredictionEngine:
             home_prob, away_prob, draw_prob = prior_h, prior_a, prior_d
             w_ml = 0.0
 
-        # Clamp and normalise
         home_prob = float(np.clip(home_prob, 0.03, 0.97))
         away_prob = float(np.clip(away_prob, 0.03, 0.97))
         if sport == "basketball":
@@ -408,17 +398,8 @@ class PredictionEngine:
         home_prob: float,
         sport: str,
     ) -> Tuple[float, float]:
-        """
-        Analytical 80% CI using a Beta distribution parameterised by:
-        - centre: home_prob
-        - concentration: scaled by data quality signals
-
-        Much faster than bootstrap (O(1) vs O(80 × model_inference)).
-        More principled: uncertainty scales with how informative our features are.
-        """
-        # Measure data quality: how far key signals deviate from 50/50 (uncertainty)
         key_signals = [
-            features.get("implied_home_prob", 0.5),   # market (high quality)
+            features.get("implied_home_prob", 0.5),
             features.get("home_form_rating",  0.5),
             features.get("home_espn_win_pct", 0.5),
             features.get("h2h_home_win_rate", 0.5),
@@ -427,7 +408,6 @@ class PredictionEngine:
 
         n_eff = self.n_training_samples.get(sport, 0)
 
-        # Effective pseudo-count: grows with signal strength and training data
         import math
         pseudo_count = 5.0 + signal_strength * 15.0 + math.log1p(n_eff) * 1.5
 
@@ -437,7 +417,6 @@ class PredictionEngine:
         ci_low  = float(np.clip(beta_dist.ppf(0.10, max(a, 0.1), max(b, 0.1)), 0.0, 1.0))
         ci_high = float(np.clip(beta_dist.ppf(0.90, max(a, 0.1), max(b, 0.1)), 0.0, 1.0))
 
-        # Ensure minimum width of 0.04
         if ci_high - ci_low < 0.04:
             mid = (ci_low + ci_high) / 2
             ci_low, ci_high = mid - 0.02, mid + 0.02
@@ -465,7 +444,6 @@ class PredictionEngine:
             rows.append(self._fv(feats, sport))
             labels.append(OUTCOME_MAP[outcome])
 
-            # Recency weight: recent matches 2×, last 90d 1.5×, older 1×
             match_date_str = rec.get("match_date", "")
             w = 1.0
             if match_date_str:
@@ -515,7 +493,6 @@ class PredictionEngine:
         self.scalers[sport].fit(X)
         X_scaled = self.scalers[sport].transform(X)
 
-        # Reinitialise with correct calibration method based on sample size
         if n >= 100 and settings.CALIBRATION_METHOD != "sigmoid":
             cal_method: Literal["sigmoid", "isotonic"] = "isotonic"
         else:
@@ -533,10 +510,10 @@ class PredictionEngine:
         )
 
         self.models[sport].fit(X_scaled, y, sample_weight=w)  # type: ignore[union-attr]
-        self.is_trained[sport]          = True
-        self.n_training_samples[sport]  = n
+        self.is_trained[sport]         = True
+        self.n_training_samples[sport] = n
 
-        # Log feature importances (from the base estimator)
+        # Log feature importances
         try:
             base_est = self.models[sport].calibrated_classifiers_[0].estimator  # type: ignore
             importances = base_est.feature_importances_
@@ -546,12 +523,10 @@ class PredictionEngine:
         except Exception:
             pass
 
-        # Bump patch version
-        parts = self.model_version.split(".")
-        parts[-1] = str(int(parts[-1]) + 1)
-        self.model_version = ".".join(parts)
-        settings.MODEL_VERSION = self.model_version
-
+        # NOTE: model version is intentionally NOT bumped here.
+        # Previously this code mutated self.model_version and settings.MODEL_VERSION
+        # on every retrain, causing version drift and filename mismatches after
+        # server restarts. The version is now stable for the entire server lifetime.
         self._save(sport)
 
         y_proba  = self.models[sport].predict_proba(X_scaled)  # type: ignore[union-attr]

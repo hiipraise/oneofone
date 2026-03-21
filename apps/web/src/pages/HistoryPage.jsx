@@ -9,17 +9,18 @@ import { submitResult } from '../services/api'
 // Aligned with backend SportType enum
 const SPORTS = ['all', 'soccer', 'basketball']
 
+const todayISO = () => new Date().toISOString().slice(0, 10)
+
 export default function HistoryPage() {
   const [searchParams] = useSearchParams()
   const defaultSport = searchParams.get('sport') || 'all'
-  // Normalise unsupported sports to 'all'
   const validSport = SPORTS.includes(defaultSport) ? defaultSport : 'all'
 
   const [sport, setSport]       = useState(validSport)
   const [view, setView]         = useState('table')
   const [search, setSearch]     = useState('')
   const [resultForm, setResultForm] = useState({
-    matchId: '', homeScore: '', awayScore: '', date: '',
+    matchId: '', homeScore: '', awayScore: '', date: todayISO(),
   })
   const [submitting, setSubmitting] = useState(false)
   const [submitMsg, setSubmitMsg]   = useState(null)
@@ -45,19 +46,37 @@ export default function HistoryPage() {
   const handleResultSubmit = async (e) => {
     e.preventDefault()
     const { matchId, homeScore, awayScore, date } = resultForm
-    if (!matchId || homeScore === '' || awayScore === '') return
+
+    if (!matchId.trim()) {
+      setSubmitMsg({ type: 'error', text: 'Match ID is required — click a row to copy it.' })
+      return
+    }
+    if (homeScore === '' || awayScore === '') {
+      setSubmitMsg({ type: 'error', text: 'Both scores are required.' })
+      return
+    }
+
+    const hs  = parseInt(homeScore, 10)
+    const as_ = parseInt(awayScore, 10)
+
+    if (isNaN(hs) || isNaN(as_) || hs < 0 || as_ < 0) {
+      setSubmitMsg({ type: 'error', text: 'Scores must be non-negative integers.' })
+      return
+    }
+
     setSubmitting(true)
     setSubmitMsg(null)
     try {
-      const hs = parseInt(homeScore)
-      const as_ = parseInt(awayScore)
       const outcome = hs > as_ ? 'home_win' : as_ > hs ? 'away_win' : 'draw'
       await submitResult({
-        match_id: matchId, home_score: hs, away_score: as_,
-        actual_outcome: outcome, match_date: date,
+        match_id:       matchId.trim(),
+        home_score:     hs,
+        away_score:     as_,
+        actual_outcome: outcome,
+        match_date:     date || todayISO(),   // never send empty string
       })
       setSubmitMsg({ type: 'success', text: `Result recorded: ${outcome.replace('_', ' ').toUpperCase()}` })
-      setResultForm({ matchId: '', homeScore: '', awayScore: '', date: '' })
+      setResultForm({ matchId: '', homeScore: '', awayScore: '', date: todayISO() })
       refetch()
     } catch (err) {
       setSubmitMsg({ type: 'error', text: err.response?.data?.detail || 'Submission failed' })
@@ -90,7 +109,6 @@ export default function HistoryPage() {
 
       {/* Filters row */}
       <div className="flex items-center gap-3 mb-5 flex-wrap">
-        {/* Sport tabs */}
         <div className="flex gap-1">
           {SPORTS.map(s => (
             <button
@@ -107,7 +125,6 @@ export default function HistoryPage() {
           ))}
         </div>
 
-        {/* Search box */}
         <div className="flex-1 min-w-[180px] max-w-xs">
           <input
             value={search}
@@ -153,8 +170,9 @@ export default function HistoryPage() {
         <p className="label mb-4">SUBMIT ACTUAL RESULT — TRIGGERS LEARNING UPDATE</p>
         <form
           onSubmit={handleResultSubmit}
-          className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end"
+          className="grid grid-cols-1 md:grid-cols-6 gap-3 items-end"
         >
+          {/* Match ID — spans 2 cols */}
           <div className="md:col-span-2">
             <label className="label block mb-1">MATCH ID</label>
             <input
@@ -164,6 +182,8 @@ export default function HistoryPage() {
               className="w-full bg-brand-darkgray border border-brand-midgray focus:border-brand-red outline-none text-white font-display text-xs px-3 py-2 rounded-sm placeholder-gray-700 transition-colors"
             />
           </div>
+
+          {/* Home score */}
           <div>
             <label className="label block mb-1">HOME SCORE</label>
             <input
@@ -173,6 +193,8 @@ export default function HistoryPage() {
               className="w-full bg-brand-darkgray border border-brand-midgray focus:border-brand-red outline-none text-white font-display text-xs px-3 py-2 rounded-sm"
             />
           </div>
+
+          {/* Away score */}
           <div>
             <label className="label block mb-1">AWAY SCORE</label>
             <input
@@ -182,10 +204,23 @@ export default function HistoryPage() {
               className="w-full bg-brand-darkgray border border-brand-midgray focus:border-brand-red outline-none text-white font-display text-xs px-3 py-2 rounded-sm"
             />
           </div>
+
+          {/* Match date — was missing entirely */}
+          <div>
+            <label className="label block mb-1">MATCH DATE</label>
+            <input
+              type="date"
+              value={resultForm.date}
+              onChange={e => setResultForm(p => ({ ...p, date: e.target.value }))}
+              className="w-full bg-brand-darkgray border border-brand-midgray focus:border-brand-red outline-none text-white font-display text-xs px-3 py-2 rounded-sm"
+            />
+          </div>
+
           <button type="submit" disabled={submitting} className="btn-primary">
             {submitting ? 'SAVING...' : 'RECORD RESULT'}
           </button>
         </form>
+
         {submitMsg && (
           <div className={`mt-3 font-display text-xs px-3 py-2 rounded-sm ${
             submitMsg.type === 'success'

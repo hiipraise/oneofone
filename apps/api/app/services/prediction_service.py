@@ -9,23 +9,27 @@ SerpAPI call budget per prediction: ~3 calls (was ~9)
   - fetch_betting_odds        → Odds API only (no SerpAPI)
   - ESPN calls                → free, no quota
 
-The old code called fetch_injury_report + fetch_venue_stats again AFTER
-fetch_team_stats already retrieved them internally — this is now fixed.
-All data comes from team_stats (which uses the combined query internally).
+Learning update isolation
+  - trigger_learning_update() opens its own AsyncIOMotorClient in its own
+    event loop running in a daemon thread — the same pattern as the daily
+    scheduler.  This avoids SSL handshake timeouts that occur when Motor's
+    async cursor falls back to pymongo.synchronous pool threads that don't
+    share the main connection's TLS session.
 """
+import asyncio
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional, List, Any
 
 from app.config.database import get_db
+from app.config.settings import settings
 from app.schemas.prediction_schema import PredictionRequest, PredictionOutput
 from app.services.web_search_service import (
     fetch_team_stats,
-    fetch_head_to_head,
     fetch_betting_odds,
-    fetch_venue_stats,
-    _fetch_combined_h2h_venue,   # internal — gives H2H + venue in one call
+    _fetch_combined_h2h_venue,
 )
 from app.services.market_service import compute_all_markets
 from app.ml.prediction_engine import prediction_engine
@@ -35,11 +39,18 @@ _PREDICTION_TTL_HOURS = 12
 
 logger = logging.getLogger(__name__)
 
+# Sports the ML engine supports — others are skipped during learning
+_SUPPORTED_ML_SPORTS = {"soccer", "basketball"}
+
 
 def _generate_match_id(home: str, away: str, sport: str, date: str = "") -> str:
     raw = f"{home.lower()}-{away.lower()}-{sport.lower()}-{date}"
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, raw))
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prediction CRUD
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def create_prediction(request: PredictionRequest) -> PredictionOutput:
     db = get_db()
@@ -57,7 +68,6 @@ async def create_prediction(request: PredictionRequest) -> PredictionOutput:
                     ts_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                 else:
                     ts_dt = ts
-                # Ensure timezone-aware for comparison
                 if ts_dt.tzinfo is None:
                     ts_dt = ts_dt.replace(tzinfo=timezone.utc)
                 age_hours = (datetime.now(timezone.utc) - ts_dt).total_seconds() / 3600
@@ -69,7 +79,7 @@ async def create_prediction(request: PredictionRequest) -> PredictionOutput:
                     )
             except Exception as e:
                 logger.warning(f"Could not parse prediction timestamp [{match_id}]: {e}")
-                is_fresh = True  # parse failure → assume fresh, don't regenerate
+                is_fresh = True
 
         if is_fresh:
             existing.pop("_id", None)
@@ -78,28 +88,20 @@ async def create_prediction(request: PredictionRequest) -> PredictionOutput:
 
     logger.info(f"Generating: {request.home_team} vs {request.away_team} [{sport}]")
 
-    # ── Data fetching — minimised SerpAPI calls ──────────────────────────────
-    # fetch_team_stats: 1 SerpAPI call per team (combined form+injuries+stats)
     home_stats = fetch_team_stats(request.home_team, sport)
     away_stats = fetch_team_stats(request.away_team, sport)
 
-    # One combined call for both H2H and venue (was 2 separate calls)
     h2h_venue = _fetch_combined_h2h_venue(request.home_team, request.away_team, sport)
     h2h   = h2h_venue["h2h"]
     venue = h2h_venue["venue"]
 
-    # Odds API — no SerpAPI quota impact
     odds = fetch_betting_odds(request.home_team, request.away_team, sport)
 
-    # ── Build feature vector ──────────────────────────────────────────────────
-    # features_from_data now preserves raw goal averages (e.g. 1.40) without
-    # clipping them to [0, 1], so xG and BTTS markets compute correctly.
     features = prediction_engine.features_from_data(
         home_stats, away_stats, h2h, odds, venue, sport=sport
     )
     result = prediction_engine.predict(features, sport=sport)
 
-    # ── Extended markets ──────────────────────────────────────────────────────
     try:
         market_features = dict(features)
         market_features["implied_home_prob"] = float(result.get("home_win_probability", features.get("implied_home_prob", 0.5)))
@@ -136,7 +138,7 @@ async def create_prediction(request: PredictionRequest) -> PredictionOutput:
     doc = output.model_dump()
     doc["timestamp"]  = doc["timestamp"].isoformat()
     doc["deleted_at"] = None
-    doc["match_date_indexed"] = match_date   # for TTL index if desired
+    doc["match_date_indexed"] = match_date
     await db.predictions.replace_one({"match_id": match_id}, doc, upsert=True)
 
     snapshot = {
@@ -163,9 +165,8 @@ async def get_predictions(
         query["sport"] = sport
     if not include_deleted:
         query["deleted_at"] = None
-    cursor = db.predictions.find(query).sort("timestamp", -1).limit(limit)
     results = []
-    async for doc in cursor:
+    async for doc in db.predictions.find(query).sort("timestamp", -1).limit(limit):
         doc.pop("_id", None)
         results.append(doc)
     return results
@@ -197,10 +198,26 @@ async def restore_prediction(match_id: str) -> bool:
     return result.matched_count > 0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Result submission + isolated background learning
+# ─────────────────────────────────────────────────────────────────────────────
+
 async def save_actual_result(
     match_id: str, home_score: int, away_score: int,
     actual_outcome: str, match_date: str,
 ):
+    """
+    Persist the actual match result, then kick off learning in a fully
+    isolated background thread (own event loop + own Motor client).
+
+    Why isolated?
+    Motor's async cursor internally delegates to pymongo.synchronous pool
+    threads.  When those threads try to open a NEW TLS connection to Atlas
+    from inside asyncio.create_task(), the SSL handshake times out because
+    they don't share the main event loop's connection pool.  Running in a
+    dedicated thread with a fresh Motor client avoids this entirely — the
+    same approach the daily scheduler uses.
+    """
     db = get_db()
     if not actual_outcome:
         actual_outcome = (
@@ -208,23 +225,85 @@ async def save_actual_result(
             else "away_win" if away_score > home_score
             else "draw"
         )
+
     doc = {
-        "match_id": match_id, "home_score": home_score, "away_score": away_score,
-        "actual_outcome": actual_outcome, "match_date": match_date,
-        "recorded_at": datetime.utcnow().isoformat(),
+        "match_id":       match_id,
+        "home_score":     home_score,
+        "away_score":     away_score,
+        "actual_outcome": actual_outcome,
+        "match_date":     match_date,
+        "recorded_at":    datetime.utcnow().isoformat(),
     }
     await db.actual_results.replace_one({"match_id": match_id}, doc, upsert=True)
-    await trigger_learning_update()
+
+    # Launch learning in a daemon thread — never blocks the HTTP response
+    t = threading.Thread(target=_run_learning_in_thread, daemon=True)
+    t.start()
+
     return doc
 
 
-async def trigger_learning_update():
-    db = get_db()
+def _run_learning_in_thread() -> None:
+    """
+    Sync entry point for the daemon thread.
+    Creates a fresh event loop — mirrors run_daily_predictions() in scheduler.
+    """
+    loop = None
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_learning_with_own_client())
+    except Exception as e:
+        logger.error(f"Learning thread fatal error: {e}", exc_info=True)
+    finally:
+        if loop is not None:
+            try:
+                loop.close()
+            except Exception:
+                pass
+
+
+async def _learning_with_own_client() -> None:
+    """
+    Opens a dedicated AsyncIOMotorClient, swaps the global db pointer
+    (so get_db() works inside helpers), runs learning, then restores.
+    Identical pattern to the scheduler's _run_predictions_async().
+    """
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from app.config import database as db_module
+
+    _saved_db     = db_module.db
+    _saved_client = db_module.client
+
+    learn_client = AsyncIOMotorClient(settings.MONGODB_URI)
+    learn_db     = learn_client[settings.MONGODB_DB]
+
+    db_module.db     = learn_db
+    db_module.client = learn_client
+
+    try:
+        await _trigger_learning_update_impl(learn_db)
+    except Exception as e:
+        logger.error(f"Learning update failed: {e}", exc_info=True)
+    finally:
+        try:
+            learn_client.close()
+        except Exception:
+            pass
+        db_module.db     = _saved_db
+        db_module.client = _saved_client
+        logger.info("Learning: isolated Motor client closed, main client restored")
+
+
+async def _trigger_learning_update_impl(db) -> None:
+    """Core ML learning logic. Receives db handle directly — no get_db() call."""
+
     actual_results: Dict[str, str] = {}
     async for doc in db.actual_results.find({}):
         actual_results[doc["match_id"]] = doc.get("actual_outcome", "")
 
     if not actual_results:
+        logger.info("Learning: no resolved results, skipping")
         return
 
     sport_records: Dict[str, List[Dict]] = {}
@@ -237,32 +316,58 @@ async def trigger_learning_update():
         if not actual:
             continue
         sport = pred.get("sport", "soccer")
-        snap  = await db.feature_snapshots.find_one({"match_id": mid})
-        features = snap.get("features", pred.get("features_used", {})) if snap else pred.get("features_used", {})
+
+        if sport not in _SUPPORTED_ML_SPORTS:
+            logger.debug(f"Learning: skipping unsupported sport '{sport}'")
+            continue
+
+        snap     = await db.feature_snapshots.find_one({"match_id": mid})
+        features = (
+            snap.get("features", pred.get("features_used", {}))
+            if snap else pred.get("features_used", {})
+        )
         sport_records.setdefault(sport, []).append({
-            "features": features,
-            "actual_outcome": actual,
-            "predicted_outcome": pred.get("predicted_outcome"),
+            "features":             features,
+            "actual_outcome":       actual,
+            "predicted_outcome":    pred.get("predicted_outcome"),
             "home_win_probability": pred.get("home_win_probability"),
-            "match_date": snap.get("match_date", "") if snap else "",
+            "match_date":           snap.get("match_date", "") if snap else "",
         })
 
     for sport, records in sport_records.items():
-        retrain_result = prediction_engine.retrain(records, sport=sport)
-        metrics        = prediction_engine.evaluate(records, sport=sport)
-        if metrics:
-            await db.model_metrics.insert_one({
-                "model_version": prediction_engine.model_version,
-                "sport": sport,
-                "date": datetime.utcnow().isoformat(),
-                **{k: metrics.get(k, 0) for k in (
-                    "brier_score", "log_loss", "calibration_error",
-                    "accuracy", "total_predictions", "ml_weight", "n_training_samples"
-                )},
-                "retrain_result": retrain_result,
-            })
-            logger.info(f"[{sport}] Metrics saved: {metrics}")
+        try:
+            retrain_result = prediction_engine.retrain(records, sport=sport)
+            metrics        = prediction_engine.evaluate(records, sport=sport)
+            if metrics:
+                await db.model_metrics.insert_one({
+                    "model_version":  prediction_engine.model_version,
+                    "sport":          sport,
+                    "date":           datetime.utcnow().isoformat(),
+                    **{k: metrics.get(k, 0) for k in (
+                        "brier_score", "log_loss", "calibration_error",
+                        "accuracy", "total_predictions", "ml_weight",
+                        "n_training_samples",
+                    )},
+                    "retrain_result": retrain_result,
+                })
+                logger.info(f"[{sport}] Learning complete: {metrics}")
+        except Exception as e:
+            logger.error(f"[{sport}] Retrain/evaluate failed: {e}", exc_info=True)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public endpoint trigger (POST /api/predictions/learn/trigger)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def trigger_learning_update() -> None:
+    """Same isolated-thread pattern so the manual trigger also works cleanly."""
+    t = threading.Thread(target=_run_learning_in_thread, daemon=True)
+    t.start()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scheduler wrapper
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def generate_prediction(
     home_team:  str,
@@ -271,16 +376,13 @@ async def generate_prediction(
     match_date: str | None = None,
     league:     str | None = None,
 ) -> "PredictionOutput":
-    """
-    Keyword-arg wrapper called by the daily scheduler.
-    Builds a PredictionRequest and delegates to create_prediction().
-    """
+    """Keyword-arg wrapper called by the daily scheduler."""
     from app.schemas.prediction_schema import SportType
 
     try:
         sport_enum = SportType(sport.lower())
     except ValueError:
-        sport_enum = SportType.SOCCER  # safe default
+        sport_enum = SportType.SOCCER
 
     request = PredictionRequest(
         home_team  = home_team,
