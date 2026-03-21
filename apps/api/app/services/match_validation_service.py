@@ -67,6 +67,19 @@ ESPN_SCOREBOARD_LEAGUES: Dict[str, List[tuple[str, str, str]]] = {
     ],
 }
 
+
+
+ESPN_SPORT_PATH: Dict[str, str] = {
+    sport: league_rows[0][0]
+    for sport, league_rows in ESPN_SCOREBOARD_LEAGUES.items()
+    if league_rows
+}
+
+ESPN_LEAGUES: Dict[str, List[str]] = {
+    sport: [league for _, league, _ in league_rows]
+    for sport, league_rows in ESPN_SCOREBOARD_LEAGUES.items()
+}
+
 _MIN_PREFIX = 4
 
 
