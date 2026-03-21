@@ -1,5 +1,6 @@
 # app/config/database.py
 import logging
+from contextvars import ContextVar
 from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
@@ -10,6 +11,13 @@ logger = logging.getLogger(__name__)
 
 client: Optional[AsyncIOMotorClient] = None
 db: Optional[AsyncIOMotorDatabase] = None
+
+# Scoped override — set only inside the scheduler's isolated event loop.
+# FastAPI's event loop never sees this value; it always reads None → falls
+# through to the global `db` bound to uvicorn's loop.
+_db_override: ContextVar[Optional[AsyncIOMotorDatabase]] = ContextVar(
+    "_db_override", default=None
+)
 
 
 async def connect_db():
@@ -29,7 +37,6 @@ async def disconnect_db():
 
 
 async def create_indexes():
-    # make sure the global `db` is set before using it
     if db is None:
         raise RuntimeError("Database connection has not been established")
     await db.predictions.create_index([("match_id", ASCENDING)], unique=True)
@@ -51,4 +58,13 @@ async def create_indexes():
 
 
 def get_db() -> Optional[AsyncIOMotorDatabase]:
-    return db
+    """
+    Returns the Motor database for the current execution context.
+
+    - Scheduler threads:  returns the per-run client set via _db_override,
+                          which is bound to their own event loop.
+    - FastAPI handlers:   _db_override is None (ContextVar default), so the
+                          global `db` bound to uvicorn's loop is returned.
+    """
+    override = _db_override.get()
+    return override if override is not None else db

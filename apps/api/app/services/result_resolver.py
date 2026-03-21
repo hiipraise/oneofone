@@ -2,22 +2,20 @@
 """
 Auto-resolution service.
 
-Fetches completed scores from the Odds API, matches them against stored
-predictions by sport + date + fuzzy team name, then calls save_actual_result
-so the ML learning pipeline triggers automatically.
+Fetches completed scores from the ESPN public scoreboard API (no key required),
+matches them against stored predictions by sport + date + fuzzy team name,
+then calls save_actual_result so the ML learning pipeline triggers automatically.
 
 Called by the daily scheduler — never touches FastAPI's Motor client directly.
 """
 import logging
 import re
-import time
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 
 import requests
 
-from app.config.settings import settings
-from app.services.match_validation_service import SPORT_KEYS
+from app.services.match_validation_service import ESPN_LEAGUES, ESPN_SPORT_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -25,112 +23,111 @@ logger = logging.getLogger(__name__)
 _DAYS_FROM = 2
 
 
-# ── Odds API score fetcher ────────────────────────────────────────────────────
+# ── ESPN score fetcher ────────────────────────────────────────────────────────
+
+def _date_range(days_back: int) -> List[str]:
+    """Return the last `days_back` dates as YYYYMMDD strings (today first)."""
+    today = datetime.now(timezone.utc).date()
+    return [
+        (today - timedelta(days=d)).strftime("%Y%m%d")
+        for d in range(days_back)
+    ]
+
+
+def _fetch_espn_league(sport_path: str, league: str, date_str: str) -> List[Dict]:
+    """
+    Fetch one ESPN scoreboard page and return completed game dicts.
+    Returns [] on any non-200 or parse error — never raises.
+    """
+    url = (
+        f"https://site.api.espn.com/apis/site/v2/sports"
+        f"/{sport_path}/{league}/scoreboard"
+    )
+    try:
+        resp = requests.get(url, params={"dates": date_str}, timeout=10)
+        if resp.status_code != 200:
+            logger.debug(f"[resolver] ESPN {resp.status_code} [{league} {date_str}]")
+            return []
+
+        games = []
+        for event in resp.json().get("events", []):
+            status = event.get("status", {}).get("type", {})
+            if not status.get("completed"):
+                continue
+
+            competition = (event.get("competitions") or [{}])[0]
+            competitors = competition.get("competitors", [])
+            if len(competitors) < 2:
+                continue
+
+            home = next((c for c in competitors if c.get("homeAway") == "home"), None)
+            away = next((c for c in competitors if c.get("homeAway") == "away"), None)
+            if not home or not away:
+                continue
+
+            try:
+                home_score = int(home.get("score", ""))
+                away_score = int(away.get("score", ""))
+            except (ValueError, TypeError):
+                continue
+
+            home_name = (home.get("team") or {}).get("displayName", "")
+            away_name = (away.get("team") or {}).get("displayName", "")
+            if not home_name or not away_name:
+                continue
+
+            # "2026-03-21T19:00:00Z" → "2026-03-21"
+            match_date = event.get("date", "")[:10]
+
+            games.append({
+                "home_team":  home_name,
+                "away_team":  away_name,
+                "home_score": home_score,
+                "away_score": away_score,
+                "match_date": match_date,
+            })
+
+        return games
+
+    except requests.exceptions.Timeout:
+        logger.warning(f"[resolver] ESPN timeout [{league} {date_str}]")
+        return []
+    except Exception as e:
+        logger.warning(f"[resolver] ESPN error [{league} {date_str}]: {e}")
+        return []
+
 
 def _fetch_completed_scores(sport: str) -> List[Dict]:
     """
-    Fetch recently completed games from the Odds API scores endpoint.
-    Returns list of dicts: {home_team, away_team, home_score, away_score, date}
+    Fetch recently completed games from the ESPN public scoreboard API.
+    Returns list of dicts: {home_team, away_team, home_score, away_score, match_date, sport}
+    No API key required.
     """
-    if not settings.ODDS_API_KEY:
+    sport_path = ESPN_SPORT_PATH.get(sport)
+    leagues    = ESPN_LEAGUES.get(sport)
+    if not sport_path or not leagues:
+        logger.warning(f"[resolver] No ESPN config for sport: {sport}")
         return []
 
-    sport_keys = SPORT_KEYS.get(sport, SPORT_KEYS["soccer"])
+    dates     = _date_range(_DAYS_FROM)
+    completed = []
+    seen      = set()
 
-    for attempt in range(3):
-        try:
-            completed = []
-            seen = set()
-            for sport_key in sport_keys:
-                resp = requests.get(
-                    f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores",
-                    params={
-                        "apiKey":   settings.ODDS_API_KEY,
-                        "daysFrom": _DAYS_FROM,
-                    },
-                    timeout=15,
+    for league in leagues:
+        for date_str in dates:
+            for game in _fetch_espn_league(sport_path, league, date_str):
+                game_key = (
+                    game["home_team"].lower(),
+                    game["away_team"].lower(),
+                    game["match_date"],
                 )
-
-                if resp.status_code == 429:
-                    wait = [5.0, 15.0][min(attempt, 1)]
-                    logger.warning(
-                        f"[resolver] Odds API 429 [{sport_key}] — "
-                        f"attempt {attempt + 1}/3, retrying in {wait}s"
-                    )
-                    time.sleep(wait)
-                    completed = []
-                    break
-
-                if resp.status_code != 200:
-                    logger.warning(f"[resolver] Odds API scores {resp.status_code} [{sport_key}]")
+                if game_key in seen:
                     continue
+                seen.add(game_key)
+                game["sport"] = sport
+                completed.append(game)
 
-                for game in resp.json():
-                    if not game.get("completed"):
-                        continue
-
-                    scores = game.get("scores") or []
-                    if len(scores) < 2:
-                        continue
-
-                    home_name  = game.get("home_team", "")
-                    away_name  = game.get("away_team", "")
-
-                    home_score_val = None
-                    away_score_val = None
-                    for s in scores:
-                        name = s.get("name", "")
-                        val  = s.get("score")
-                        if val is None:
-                            continue
-                        try:
-                            val = int(val)
-                        except (ValueError, TypeError):
-                            continue
-                        if _names_match(name, home_name):
-                            home_score_val = val
-                        elif _names_match(name, away_name):
-                            away_score_val = val
-
-                    if home_score_val is None or away_score_val is None:
-                        continue
-
-                    match_date = game.get("commence_time", "")[:10]
-                    if not match_date:
-                        continue
-
-                    game_key = (home_name.lower(), away_name.lower(), match_date)
-                    if game_key in seen:
-                        continue
-                    seen.add(game_key)
-
-                    completed.append({
-                        "home_team":   home_name,
-                        "away_team":   away_name,
-                        "home_score":  home_score_val,
-                        "away_score":  away_score_val,
-                        "match_date":  match_date,
-                        "sport":       sport,
-                    })
-
-            if not completed and attempt < 2:
-                continue
-
-            return completed
-
-        except requests.exceptions.Timeout:
-            wait = [5.0, 15.0][min(attempt, 1)]
-            logger.warning(
-                f"[resolver] Odds API timeout [{sport}] — "
-                f"attempt {attempt + 1}/3, retrying in {wait}s"
-            )
-            time.sleep(wait)
-
-        except Exception as e:
-            logger.error(f"[resolver] Odds API scores error [{sport}]: {e}")
-            return []
-
-    return []
+    return completed
 
 
 # ── Team name fuzzy matching ──────────────────────────────────────────────────
@@ -162,13 +159,12 @@ def _find_matching_prediction(
     stored_predictions: List[Dict],
 ) -> Optional[Dict]:
     """
-    Find a stored prediction that matches a completed Odds API game.
+    Find a stored prediction that matches a completed ESPN game.
     Matches on: sport, match_date (±1 day tolerance), fuzzy team names.
     """
-    target_date = completed["match_date"]
+    target_date  = completed["match_date"]
     target_sport = completed["sport"]
 
-    # Allow ±1 day to handle timezone edge cases
     try:
         dt = datetime.strptime(target_date, "%Y-%m-%d")
         candidate_dates = {
@@ -205,7 +201,7 @@ def _derive_outcome(home_score: int, away_score: int, sport: str) -> str:
 
 async def resolve_results() -> Dict:
     """
-    Main entry point. Fetches completed scores, matches to predictions,
+    Main entry point. Fetches completed scores via ESPN, matches to predictions,
     and persists results. Returns a summary dict for logging.
     """
     from app.config.database import get_db
@@ -213,12 +209,11 @@ async def resolve_results() -> Dict:
 
     db = get_db()
 
-    # Pre-load predictions from the last 3 days to avoid per-game DB queries
     cutoff = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
     stored: List[Dict] = []
     async for pred in db.predictions.find(
         {"match_date": {"$gte": cutoff}, "deleted_at": None},
-        {"match_id": 1, "home_team": 1, "away_team": 1, "sport": 1, "match_date": 1}
+        {"match_id": 1, "home_team": 1, "away_team": 1, "sport": 1, "match_date": 1},
     ):
         pred.pop("_id", None)
         stored.append(pred)
@@ -227,7 +222,6 @@ async def resolve_results() -> Dict:
         logger.info("[resolver] No recent predictions found — nothing to resolve")
         return {"resolved": 0, "skipped": 0, "errors": 0}
 
-    # Pre-load already-resolved match IDs to avoid duplicate writes
     already_resolved: set = set()
     async for doc in db.actual_results.find({}, {"match_id": 1}):
         already_resolved.add(doc["match_id"])
@@ -236,8 +230,8 @@ async def resolve_results() -> Dict:
     skipped  = 0
     errors   = 0
 
-    for sport in ["soccer", "basketball"]:
-        logger.info(f"[resolver] Fetching completed {sport} scores…")
+    for sport in ESPN_LEAGUES:
+        logger.info(f"[resolver] Fetching completed {sport} scores via ESPN…")
         completed_games = _fetch_completed_scores(sport)
 
         if not completed_games:
@@ -251,7 +245,7 @@ async def resolve_results() -> Dict:
                 match = _find_matching_prediction(game, stored)
                 if not match:
                     logger.debug(
-                        f"[resolver] No prediction found for "
+                        f"[resolver] No prediction for "
                         f"{game['home_team']} vs {game['away_team']} [{sport}]"
                     )
                     skipped += 1
@@ -267,11 +261,11 @@ async def resolve_results() -> Dict:
                 outcome = _derive_outcome(game["home_score"], game["away_score"], sport)
 
                 await save_actual_result(
-                    match_id      = match_id,
-                    home_score    = game["home_score"],
-                    away_score    = game["away_score"],
-                    actual_outcome= outcome,
-                    match_date    = game["match_date"],
+                    match_id       = match_id,
+                    home_score     = game["home_score"],
+                    away_score     = game["away_score"],
+                    actual_outcome = outcome,
+                    match_date     = game["match_date"],
                 )
 
                 already_resolved.add(match_id)

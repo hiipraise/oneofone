@@ -25,9 +25,8 @@ from typing import List, Dict, Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from app.config.database import get_db
+from app.config.database import get_db, _db_override
 from app.config.settings import settings
-from app.config.database import connect_db, disconnect_db
 import time
 from app.services.web_search_service import get_serpapi_usage
 from app.services.quota_service import record_serpapi_calls
@@ -92,7 +91,7 @@ async def _fetch_today_fixtures(sport: str) -> List[Dict]:
         logger.warning(f"[scheduler] ODDS_API_KEY not set — skipping {sport}")
         return []
 
-    today     = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today      = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     sport_keys = SPORT_KEYS.get(sport, SPORT_KEYS["soccer"])
 
     for attempt in range(3):
@@ -143,6 +142,7 @@ async def _fetch_today_fixtures(sport: str) -> List[Dict]:
                         "match_date": today,
                         "league":     game.get("sport_title", ""),
                     })
+
             if not fixtures and attempt < 2:
                 continue
             return fixtures
@@ -172,9 +172,7 @@ async def _run_predictions_async() -> None:
     run_start = datetime.now(timezone.utc)
     await _log_to_db("INFO", f"Daily scheduler started — {run_start.strftime('%Y-%m-%d %H:%M UTC')}")
 
-    # Snapshot Serper usage before the run so we can record the delta at the end
-    serper_before = get_serpapi_usage()["used"]
-
+    serper_before   = get_serpapi_usage()["used"]
     total_generated = 0
     total_errors    = 0
 
@@ -213,8 +211,8 @@ async def _run_predictions_async() -> None:
                     sport_generated += 1
                     total_generated += 1
                 except Exception as e:
-                    sport_errors += 1
-                    total_errors += 1
+                    sport_errors  += 1
+                    total_errors  += 1
                     logger.error(
                         f"[scheduler] Prediction failed "
                         f"[{fixture['home_team']} vs {fixture['away_team']}]: {e}"
@@ -236,7 +234,7 @@ async def _run_predictions_async() -> None:
             logger.error(f"[scheduler] Sport loop error [{sport}]: {e}")
             await _log_to_db("ERROR", f"{sport} processing failed: {e}", sport=sport)
 
-    # ── Persist Serper quota delta to MongoDB (awaited — no fire-and-forget) ──
+    # ── Persist Serper quota delta ────────────────────────────────────────────
     serper_calls_made = get_serpapi_usage()["used"] - serper_before
     if serper_calls_made > 0:
         try:
@@ -263,29 +261,25 @@ def run_daily_predictions() -> None:
 
     async def _run():
         from motor.motor_asyncio import AsyncIOMotorClient
-        from app.config import database as db_module
-
-        _saved_db     = db_module.db
-        _saved_client = db_module.client
 
         _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
         _sched_db     = _sched_client[settings.MONGODB_DB]
 
-        db_module.db     = _sched_db
-        db_module.client = _sched_client
-
+        # Scope this DB client to the current async context only.
+        # FastAPI's event loop never sees this value — it reads None from
+        # the ContextVar default and falls through to its own `db` global.
+        token = _db_override.set(_sched_db)
         try:
             await _run_predictions_async()
         finally:
+            _db_override.reset(token)
             try:
                 _sched_client.close()
             except Exception:
                 pass
-            db_module.db     = _saved_db
-            db_module.client = _saved_client
-            logger.info("[scheduler] DB client restored to FastAPI's loop")
+            logger.info("[scheduler] DB client closed (predictions context)")
 
-    loop = None   # ← initialise before try so finally can always reference it
+    loop = None
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -294,7 +288,7 @@ def run_daily_predictions() -> None:
         logger.error(f"[scheduler] Fatal error in run_daily_predictions: {e}")
         _log_sync("ERROR", f"Fatal scheduler error: {e}")
     finally:
-        if loop is not None:   # ← guard against the case where new_event_loop() itself failed
+        if loop is not None:
             try:
                 loop.close()
             except Exception:
@@ -324,34 +318,27 @@ async def _run_resolution_async() -> None:
 
 def run_result_resolution() -> None:
     """
-    Sync entry point for APScheduler — same isolated DB client pattern
+    Sync entry point for APScheduler — uses the same ContextVar isolation
     as run_daily_predictions so FastAPI's Motor client is never touched.
     """
     logger.info("[resolver] run_result_resolution() called")
 
     async def _run():
         from motor.motor_asyncio import AsyncIOMotorClient
-        from app.config import database as db_module
-
-        _saved_db     = db_module.db
-        _saved_client = db_module.client
 
         _sched_client = AsyncIOMotorClient(settings.MONGODB_URI)
         _sched_db     = _sched_client[settings.MONGODB_DB]
 
-        db_module.db     = _sched_db
-        db_module.client = _sched_client
-
+        token = _db_override.set(_sched_db)
         try:
             await _run_resolution_async()
         finally:
+            _db_override.reset(token)
             try:
                 _sched_client.close()
             except Exception:
                 pass
-            db_module.db     = _saved_db
-            db_module.client = _saved_client
-            logger.info("[resolver] DB client restored to FastAPI's loop")
+            logger.info("[resolver] DB client closed (resolution context)")
 
     loop = None
     try:
@@ -367,6 +354,8 @@ def run_result_resolution() -> None:
                 loop.close()
             except Exception:
                 pass
+
+
 # ── APScheduler setup ─────────────────────────────────────────────────────────
 
 def start_scheduler() -> None:

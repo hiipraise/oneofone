@@ -45,6 +45,39 @@ SPORT_KEYS: Dict[str, List[str]] = {
     ],
 }
 
+# ── ESPN config (used by result_resolver) ─────────────────────────────────────
+# Free public scoreboard API — no key required.
+# URL pattern:
+#   https://site.api.espn.com/apis/site/v2/sports/{ESPN_SPORT_PATH[sport]}/{league}/scoreboard
+
+ESPN_SPORT_PATH: Dict[str, str] = {
+    "soccer":     "soccer",
+    "basketball": "basketball",
+}
+
+ESPN_LEAGUES: Dict[str, List[str]] = {
+    "soccer": [
+        "eng.1",          # Premier League
+        "esp.1",          # La Liga
+        "ger.1",          # Bundesliga
+        "ita.1",          # Serie A
+        "fra.1",          # Ligue 1
+        "uefa.champions", # Champions League
+        "uefa.europa",    # Europa League
+        "usa.1",          # MLS
+        "por.1",          # Primeira Liga
+        "ned.1",          # Eredivisie
+        "bra.1",          # Brasileirao
+        "arg.1",          # Primera Division
+        "tur.1",          # Super Lig
+        "mex.1",          # Liga MX
+    ],
+    "basketball": [
+        "nba",
+        "mens-college-basketball",
+    ],
+}
+
 _MIN_PREFIX = 4
 
 
