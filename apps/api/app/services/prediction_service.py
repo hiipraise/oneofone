@@ -23,6 +23,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Optional, List, Any
 
+from pymongo.errors import ConfigurationError
+
 from app.config.database import get_db
 from app.config.settings import settings
 from app.schemas.prediction_schema import PredictionRequest, PredictionOutput
@@ -41,6 +43,20 @@ logger = logging.getLogger(__name__)
 
 # Sports the ML engine supports — others are skipped during learning
 _SUPPORTED_ML_SPORTS = {"soccer", "basketball"}
+
+
+def _is_mongo_dns_resolution_error(exc: Exception) -> bool:
+    """Return True when PyMongo failed to resolve an SRV/TXT Mongo host."""
+    if not isinstance(exc, ConfigurationError):
+        return False
+
+    message = str(exc).lower()
+    return (
+        "dns" in message
+        or "resolution lifetime expired" in message
+        or "operation timed out" in message
+        or "srv" in message
+    )
 
 
 def _generate_match_id(home: str, away: str, sport: str, date: str = "") -> str:
@@ -253,6 +269,15 @@ def _run_learning_in_thread() -> None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(_learning_with_own_client())
+    except ConfigurationError as e:
+        if _is_mongo_dns_resolution_error(e):
+            logger.warning(
+                "Learning update skipped because MongoDB DNS resolution failed "
+                "for the isolated background client: %s",
+                e,
+            )
+        else:
+            logger.error(f"Learning thread fatal error: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Learning thread fatal error: {e}", exc_info=True)
     finally:
@@ -275,7 +300,18 @@ async def _learning_with_own_client() -> None:
     _saved_db     = db_module.db
     _saved_client = db_module.client
 
-    learn_client = AsyncIOMotorClient(settings.MONGODB_URI)
+    try:
+        learn_client = AsyncIOMotorClient(settings.MONGODB_URI)
+    except ConfigurationError as e:
+        if _is_mongo_dns_resolution_error(e):
+            logger.warning(
+                "Learning update skipped because MongoDB URI resolution failed. "
+                "Verify DNS reachability for the Atlas SRV record or use a "
+                "non-SRV MongoDB URI. Error: %s",
+                e,
+            )
+            return
+        raise
     learn_db     = learn_client[settings.MONGODB_DB]
 
     db_module.db     = learn_db
